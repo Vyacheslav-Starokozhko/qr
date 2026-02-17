@@ -1,0 +1,4 @@
+/dist
+/node_modules
+/output.svg
+/package-lock.json
