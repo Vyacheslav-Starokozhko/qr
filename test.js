@@ -7,14 +7,83 @@ const path2 =
   "M24.906 35.295a12.548 12.548 0 0 1-4.153-2.425c-2.545-2.244-4.152-5.517-4.152-9.152V8.906c0-1.482 1.012-2.782 2.466-3.17L24.12 4.4a.623.623 0 0 1 .785.592v18.72c0 3.635 1.608 6.901 4.153 9.152a12.564 12.564 0 0 1-4.153 2.431Z"; // ...shortened
 const fullWLogo = path1 + " " + path2; // Just concatenating
 
+// const svg = generateSVG({
+//   text: "https://github.com",
+//   shape: "custom-icon",
+//   color: "#000000",
+//   bgColor: "#FFFFFF",
+//   padding: 2,
+//   customIconPath: fullWLogo,
+//   customIconViewBox: "0 0 41 36",
+// });
+
 const svg = generateSVG({
-  text: "https://github.com",
-  shape: "custom-icon",
-  color: "#000000",
-  bgColor: "#FFFFFF",
-  padding: 2,
-  customIconPath: fullWLogo,
-  customIconViewBox: "0 0 41 36",
+  data: "https://wiki.org",
+  padding: 1,
+  width: 500,
+  height: 500,
+  borderRadius: 50,
+  background: {
+    // color: "#ffffff",
+    gradient: {
+      type: "linear",
+      rotation: 90, // Вертикальний градієнт
+      colorStops: [
+        { offset: "0%", color: "#021ffa" }, // Червоний
+        { offset: "100%", color: "#ed0909" }, // Чорний
+      ],
+    },
+  },
+
+  // 1. ДАНІ (DOTS): Кастомна іконка "W" + ГРАДІЄНТ
+  dotsOptions: {
+    shape: "custom-icon",
+    color: "white", // Fallback (якщо маски не підтримуються, хоча вони підтримуються всіма)
+
+    // ВАЖЛИВО: Щоб був градієнт, треба передати цей об'єкт
+    // gradient: {
+    //   type: "linear",
+    //   rotation: 180, // Вертикальний градієнт
+    //   colorStops: [
+    //     { offset: "0%", color: "#FF0000" }, // Червоний
+    //     { offset: "100%", color: "#000000" }, // Чорний
+    //   ],
+    // },
+
+    scale: 1,
+    customIconPath: fullWLogo,
+    customIconViewBox: "0 0 41 36",
+  },
+
+  // 2. РАМКА ОКА: Звичайний квадрат + Градієнт
+  cornersSquareOptions: {
+    shape: "square",
+    color: "black",
+    gradient: {
+      type: "linear",
+      rotation: 180, // Вертикальний градієнт
+      colorStops: [
+        { offset: "0%", color: "#EEAECA" }, // Червоний
+        { offset: "100%", color: "#00D4FF" }, // Чорний
+      ],
+    },
+  },
+
+  // 3. ЦЕНТР ОКА: Одна велика фігура (серце) + СУЦІЛЬНИЙ КОЛІР
+  cornersDotOptions: {
+    shape: "heart",
+    // color: "#ff0000", // Суцільний червоний без градієнта
+    gradient: {
+      type: "linear",
+      rotation: 90, // Вертикальний градієнт
+      colorStops: [
+        { offset: "0%", color: "#edf505" }, // Червоний
+        { offset: "100%", color: "#1aebd9" }, // Чорний
+      ],
+    },
+    isSingle: true,
+    scale: 1.2,
+  },
 });
 
 console.log("Done!");

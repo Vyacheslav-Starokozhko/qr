@@ -1,166 +1,193 @@
-// Type for drawing function
-export type ShapeDrawer = (x: number, y: number) => string;
+// src/renderer/shapes.ts
+
+// Helper для округлення дробів (зменшує розмір SVG)
+const f = (n: number) => Number(n.toFixed(3));
+
+export type ShapeDrawer = (x: number, y: number, scale?: number) => string;
 
 export const shapes: Record<string, ShapeDrawer> = {
   // --- BASIC SHAPES ---
 
   // Classic square
-  square: (x, y) => {
-    // Move to x,y -> horizontal 1 -> vertical 1 -> horizontal -1 -> close
-    return `M ${x} ${y} h 1 v 1 h -1 z`;
-  },
-
-  // Circle (maximum size within the cell)
-  circle: (x, y) => {
+  square: (x, y, s = 1) => {
+    // s = розмір сторони (від 0 до 1)
+    const r = s / 2; // половина сторони
     const cx = x + 0.5;
     const cy = y + 0.5;
-    const r = 0.5; // Full radius
-    // Draw with two arcs (Arc)
-    return `M ${cx - r}, ${cy} a ${r},${r} 0 1,0 ${r * 2},0 a ${r},${r} 0 1,0 -${r * 2},0`;
+    return `M ${f(cx - r)} ${f(cy - r)} h ${s} v ${s} h -${s} Z`;
   },
 
-  // Rounded square (softer than regular)
-  rounded: (x, y) => {
-    const r = 0.2; // Corner rounding radius
-    // Start offset from top-left corner
-    return `M ${x + r} ${y} 
-            h ${1 - 2 * r} a ${r} ${r} 0 0 1 ${r} ${r} 
-            v ${1 - 2 * r} a ${r} ${r} 0 0 1 -${r} ${r} 
-            h -${1 - 2 * r} a ${r} ${r} 0 0 1 -${r} -${r} 
-            v -${1 - 2 * r} a ${r} ${r} 0 0 1 ${r} -${r} z`;
+  // Circle
+  circle: (x, y, s = 1) => {
+    const r = 0.5 * s; // Радіус
+    const cx = x + 0.5;
+    const cy = y + 0.5;
+    // Малюємо двома дугами
+    return `M ${f(cx - r)} ${f(cy)} A ${f(r)} ${f(r)} 0 1 0 ${f(cx + r)} ${f(cy)} A ${f(r)} ${f(r)} 0 1 0 ${f(cx - r)} ${f(cy)} Z`;
+  },
+
+  // Rounded square
+  rounded: (x, y, s = 1) => {
+    const r = 0.2 * s; // Радіус скруглення залежить від масштабу
+    const half = 0.5 * s; // Половина ширини
+    const cx = x + 0.5;
+    const cy = y + 0.5;
+
+    // Починаємо з верхнього лівого кута (з урахуванням радіуса)
+    return `
+      M ${f(cx - half + r)} ${f(cy - half)}
+      h ${f(s - 2 * r)} 
+      a ${f(r)} ${f(r)} 0 0 1 ${f(r)} ${f(r)}
+      v ${f(s - 2 * r)} 
+      a ${f(r)} ${f(r)} 0 0 1 ${f(-r)} ${f(r)}
+      h ${f(-(s - 2 * r))} 
+      a ${f(r)} ${f(r)} 0 0 1 ${f(-r)} ${f(-r)}
+      v ${f(-(s - 2 * r))} 
+      a ${f(r)} ${f(r)} 0 0 1 ${f(r)} ${f(-r)} 
+      Z
+    `;
   },
 
   // --- COMPLEX SHAPES ---
 
   // Heart ❤️
-  heart: (x, y) => {
-    // Scale to make the heart "fatter" and better fill the cell
-    const s = 1.1;
-    const dx = x + 0.5;
-    const dy = y + 0.5;
+  heart: (x, y, s = 1) => {
+    // scale 1.1 виглядає краще для серця, тому множимо вхідний scale на це
+    const size = s;
+    const cx = x + 0.5;
+    const cy = y + 0.5;
+
+    // Координати контрольних точок Безьє масштабуються на size
     return `
-      M ${dx} ${dy - 0.3 * s} 
-      C ${dx} ${dy - 0.5 * s}, ${dx - 0.5 * s} ${dy - 0.5 * s}, ${dx - 0.5 * s} ${dy - 0.1 * s} 
-      C ${dx - 0.5 * s} ${dy + 0.2 * s}, ${dx - 0.2 * s} ${dy + 0.4 * s}, ${dx} ${dy + 0.6 * s} 
-      C ${dx + 0.2 * s} ${dy + 0.4 * s}, ${dx + 0.5 * s} ${dy + 0.2 * s}, ${dx + 0.5 * s} ${dy - 0.1 * s} 
-      C ${dx + 0.5 * s} ${dy - 0.5 * s}, ${dx} ${dy - 0.5 * s}, ${dx} ${dy - 0.3 * s} 
-      z`;
+      M ${f(cx)} ${f(cy - 0.3 * size)}
+      C ${f(cx)} ${f(cy - 0.5 * size)}, ${f(cx - 0.5 * size)} ${f(cy - 0.5 * size)}, ${f(cx - 0.5 * size)} ${f(cy - 0.1 * size)}
+      C ${f(cx - 0.5 * size)} ${f(cy + 0.2 * size)}, ${f(cx - 0.2 * size)} ${f(cy + 0.4 * size)}, ${f(cx)} ${f(cy + 0.6 * size)}
+      C ${f(cx + 0.2 * size)} ${f(cy + 0.4 * size)}, ${f(cx + 0.5 * size)} ${f(cy + 0.2 * size)}, ${f(cx + 0.5 * size)} ${f(cy - 0.1 * size)}
+      C ${f(cx + 0.5 * size)} ${f(cy - 0.5 * size)}, ${f(cx)} ${f(cy - 0.5 * size)}, ${f(cx)} ${f(cy - 0.3 * size)}
+      Z
+    `;
   },
 
   // 5-pointed star ⭐
-  star: (x, y) => {
-    // This is a bit more complex, need to calculate 10 points.
-    // For simplicity I use a pre-calculated path for the star
-    // and scale/shift it to coordinates x,y.
-
+  star: (x, y, s = 1) => {
     const cx = x + 0.5;
     const cy = y + 0.5;
-    // Star vertices (outer radius ~0.5, inner ~0.2)
-    // Coordinates relative to center (cx, cy)
+
+    // Всі зміщення множимо на s
     return `
-      M ${cx} ${cy - 0.5} 
-      L ${cx + 0.11} ${cy - 0.15} 
-      L ${cx + 0.47} ${cy - 0.15} 
-      L ${cx + 0.18} ${cy + 0.06} 
-      L ${cx + 0.29} ${cy + 0.4} 
-      L ${cx} ${cy + 0.19} 
-      L ${cx - 0.29} ${cy + 0.4} 
-      L ${cx - 0.18} ${cy + 0.06} 
-      L ${cx - 0.47} ${cy - 0.15} 
-      L ${cx - 0.11} ${cy - 0.15} 
-      z`;
+      M ${f(cx)} ${f(cy - 0.5 * s)} 
+      L ${f(cx + 0.11 * s)} ${f(cy - 0.15 * s)} 
+      L ${f(cx + 0.47 * s)} ${f(cy - 0.15 * s)} 
+      L ${f(cx + 0.18 * s)} ${f(cy + 0.06 * s)} 
+      L ${f(cx + 0.29 * s)} ${f(cy + 0.4 * s)} 
+      L ${f(cx)} ${f(cy + 0.19 * s)} 
+      L ${f(cx - 0.29 * s)} ${f(cy + 0.4 * s)} 
+      L ${f(cx - 0.18 * s)} ${f(cy + 0.06 * s)} 
+      L ${f(cx - 0.47 * s)} ${f(cy - 0.15 * s)} 
+      L ${f(cx - 0.11 * s)} ${f(cy - 0.15 * s)} 
+      Z`;
   },
 
-  // Wave 🌊 (block with curved top and bottom)
-  wave: (x, y) => {
-    // Use quadratic Bezier curves (Q) to create "humps"
-    // Top line curves down, bottom also curves down, creating flow effect.
+  // Wave 🌊
+  wave: (x, y, s = 1) => {
+    // Центруємо хвилю по вертикалі
+    // Повна висота хвилі ~0.8 * s
+    const topY = y + 0.5 - 0.4 * s;
+    const bottomY = y + 0.5 + 0.4 * s;
+    const midY = y + 0.5;
+
+    // Ширина хвилі теж залежить від s, відступаємо від країв
+    const leftX = x + (0.5 - 0.5 * s);
+    const rightX = x + (0.5 + 0.5 * s);
+    const midX = x + 0.5;
+
     return `
-      M ${x} ${y + 0.1} 
-      Q ${x + 0.5} ${y - 0.1} ${x + 1} ${y + 0.1} 
-      V ${y + 0.9} 
-      Q ${x + 0.5} ${y + 0.7} ${x} ${y + 0.9} 
-      z`;
+      M ${f(leftX)} ${f(midY - 0.1 * s)} 
+      Q ${f(midX)} ${f(topY - 0.2 * s)} ${f(rightX)} ${f(midY - 0.1 * s)} 
+      V ${f(bottomY)} 
+      Q ${f(midX)} ${f(bottomY - 0.2 * s)} ${f(leftX)} ${f(bottomY)} 
+      Z`;
   },
-  capsule: (cx: number, cy: number) => {
-    // scale 0.23 gives width 0.46 (almost half a cell), this is better for readability
-    const scale = 0.23;
 
-    const r = 1 * scale;
-    const h_straight = 1 * scale;
+  // Vertical Capsule (Pill)
+  capsule: (x, y, s = 1) => {
+    const cx = x + 0.5;
+    const cy = y + 0.5;
+
+    // За замовчуванням капсула вузька (співвідношення 1:2 приблизно)
+    // Якщо s=1, ширина буде 0.5, висота 1.0
+    const r = 0.25 * s; // Радіус половини ширини
+    const h_straight = 0.25 * s; // Висота прямої секції (від центру)
 
     return `
-      M ${cx - r} ${cy - h_straight} 
-      A ${r} ${r} 0 0 1 ${cx + r} ${cy - h_straight} 
-      V ${cy + h_straight} 
-      A ${r} ${r} 0 0 1 ${cx - r} ${cy + h_straight} 
+      M ${f(cx - r)} ${f(cy - h_straight)} 
+      A ${f(r)} ${f(r)} 0 0 1 ${f(cx + r)} ${f(cy - h_straight)} 
+      V ${f(cy + h_straight)} 
+      A ${f(r)} ${f(r)} 0 0 1 ${f(cx - r)} ${f(cy + h_straight)} 
       Z
     `;
   },
-  diamond: (x: number, y: number) => {
+
+  // Diamond ♦️
+  diamond: (x, y, s = 1) => {
     const cx = x + 0.5;
     const cy = y + 0.5;
-
-    // Radius from center to vertex.
-    // 0.5 = full touching of neighbors.
-    // 0.45 = small gaps (looks stylish).
-    const r = 0.45;
+    const r = 0.5 * s; // Радіус від центру до вершини
 
     return `
-      M ${cx} ${cy - r}      
-      L ${cx + r} ${cy}      
-      L ${cx} ${cy + r}      
-      L ${cx - r} ${cy}      
+      M ${f(cx)} ${f(cy - r)} 
+      L ${f(cx + r)} ${f(cy)} 
+      L ${f(cx)} ${f(cy + r)} 
+      L ${f(cx - r)} ${f(cy)} 
       Z
     `;
   },
-  hexagon: (x: number, y: number) => {
+
+  // Hexagon ⬢
+  hexagon: (x, y, s = 1) => {
     const cx = x + 0.5;
     const cy = y + 0.5;
-    const r = 0.45; // Radius
-    const w = 0.25; // Half the width of the top edge (r * sin(30))
+    const r = 0.48 * s; // Радіус (трохи менше 0.5 щоб не злипалось при s=1)
+    const w = r * 0.577; // tan(30) * r ≈ ширина верхньої грані
 
-    // Draw hexagon with flat top
     return `
-      M ${cx - w} ${cy - r} 
-      L ${cx + w} ${cy - r} 
-      L ${cx + r} ${cy} 
-      L ${cx + w} ${cy + r} 
-      L ${cx - w} ${cy + r} 
-      L ${cx - r} ${cy} 
+      M ${f(cx - w)} ${f(cy - r)} 
+      L ${f(cx + w)} ${f(cy - r)} 
+      L ${f(cx + r)} ${f(cy)} 
+      L ${f(cx + w)} ${f(cy + r)} 
+      L ${f(cx - w)} ${f(cy + r)} 
+      L ${f(cx - r)} ${f(cy)} 
       Z
     `;
   },
-  leaf: (x: number, y: number) => {
+
+  // Leaf 🍃
+  leaf: (x, y, s = 1) => {
     const cx = x + 0.5;
     const cy = y + 0.5;
-
-    // Radius (half the leaf height)
-    const r = 0.5;
-
-    // To make the leaf "plump", the arc curvature radius must be greater than r.
-    // If curveR = r, this will be a perfect circle.
-    // If curveR > r, this will be a "flattened" circle (lemon).
-    const curveR = 0.8;
+    const r = 0.5 * s;
+    const curveR = 0.8 * s; // Радіус кривизни дуги
 
     return `
-      M ${cx} ${cy - r} 
-      A ${curveR} ${curveR} 0 0 1 ${cx} ${cy + r} 
-      A ${curveR} ${curveR} 0 0 1 ${cx} ${cy - r} 
+      M ${f(cx)} ${f(cy - r)} 
+      A ${f(curveR)} ${f(curveR)} 0 0 1 ${f(cx)} ${f(cy + r)} 
+      A ${f(curveR)} ${f(curveR)} 0 0 1 ${f(cx)} ${f(cy - r)} 
       Z
     `;
   },
-  triangle: (x: number, y: number) => {
+
+  // Triangle ▲
+  triangle: (x, y, s = 1) => {
     const cx = x + 0.5;
     const cy = y + 0.5;
-    const r = 0.45; // Offset from center
+    const r = 0.5 * s;
+    // Зсуваємо трохи вниз, щоб візуально було по центру
+    const offsetY = 0.1 * s;
 
-    // Equilateral triangle pointing upward
-    // (Can be flipped by changing signs in cy)
     return `
-      M ${cx} ${cy - r} 
-      L ${cx + r} ${cy + r} 
-      L ${cx - r} ${cy + r} 
+      M ${f(cx)} ${f(cy - r + offsetY)} 
+      L ${f(cx + r)} ${f(cy + r + offsetY)} 
+      L ${f(cx - r)} ${f(cy + r + offsetY)} 
       Z
     `;
   },
