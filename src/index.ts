@@ -1,6 +1,6 @@
 import { QRAnalyzer } from "./core/analyzer";
 import { shapes } from "./renderer/shapes";
-import { NewQRConfig, QrPart, QrImage, Gradient } from "./types";
+import { NewQRConfig, QrPart, QrImage, QrFrame, Gradient } from "./types";
 
 // --- Helpers ---
 
@@ -87,6 +87,106 @@ function createSymbol(id: string, part: QrPart): string {
   return "";
 }
 
+// --- Auto-layout for images without explicit x/y ---
+
+/**
+ * Returns true if a rectangle [rx, ry, rw, rh] overlaps any of the 3 eye zones.
+ * Eye zones are 7×7 blocks at TL, TR, BL corners of the matrix (0-indexed, no padding).
+ */
+function overlapsEye(
+  rx: number,
+  ry: number,
+  rw: number,
+  rh: number,
+  matrixSize: number,
+): boolean {
+  const eyes = [
+    { x: 0, y: 0 },
+    { x: matrixSize - 7, y: 0 },
+    { x: 0, y: matrixSize - 7 },
+  ];
+  for (const e of eyes) {
+    const overlapX = rx < e.x + 7 && rx + rw > e.x;
+    const overlapY = ry < e.y + 7 && ry + rh > e.y;
+    if (overlapX && overlapY) return true;
+  }
+  return false;
+}
+
+/**
+ * Resolves x/y for images that don't have explicit coordinates.
+ * Images with x/y set are returned unchanged.
+ * Auto-positioned images are distributed in the data zone avoiding eye areas.
+ */
+function resolveImagePositions(
+  images: import("./types").QrImage[],
+  matrixSize: number,
+): import("./types").QrImage[] {
+  const manual = images.filter((img) => img.x != null && img.y != null);
+  const auto = images.filter((img) => img.x == null || img.y == null);
+
+  if (auto.length === 0) return images;
+
+  // Data zone bounds (inside the eye-free area)
+  const dataStart = 8; // leave 1 module gap after eye zone (7+1)
+  const dataEnd = matrixSize - 8;
+  const dataSize = dataEnd - dataStart; // usable width/height
+
+  // Center of the full matrix
+  const cx = matrixSize / 2;
+  const cy = matrixSize / 2;
+
+  // Candidate positions (in matrix coords, no padding)
+  // We'll pick the best N positions for N auto images
+  const candidates: { x: number; y: number }[] = [
+    // 1. Center
+    { x: cx, y: cy },
+    // 2. Left-center, Right-center
+    { x: dataStart + dataSize * 0.25, y: cy },
+    { x: dataStart + dataSize * 0.75, y: cy },
+    // 3. Top-center
+    { x: cx, y: dataStart + dataSize * 0.25 },
+    // 4. Bottom-center
+    { x: cx, y: dataStart + dataSize * 0.75 },
+    // 5. Bottom-right corner of data zone
+    { x: dataStart + dataSize * 0.75, y: dataStart + dataSize * 0.75 },
+    // 6. Top-right of data zone (safe — no eye there)
+    { x: dataStart + dataSize * 0.75, y: dataStart + dataSize * 0.25 },
+    // 7. Bottom-left of data zone
+    { x: dataStart + dataSize * 0.25, y: dataStart + dataSize * 0.75 },
+    // 8. Top-left of data zone (safe — no eye there for inner data)
+    { x: dataStart + dataSize * 0.25, y: dataStart + dataSize * 0.25 },
+  ];
+
+  const resolved: import("./types").QrImage[] = [];
+  let candidateIdx = 0;
+
+  for (const img of auto) {
+    // Find the next candidate that doesn't overlap an eye zone
+    let placed = false;
+    while (candidateIdx < candidates.length) {
+      const c = candidates[candidateIdx++];
+      const imgX = c.x - img.width / 2;
+      const imgY = c.y - img.height / 2;
+      if (!overlapsEye(imgX, imgY, img.width, img.height, matrixSize)) {
+        resolved.push({ ...img, x: imgX, y: imgY });
+        placed = true;
+        break;
+      }
+    }
+    // Fallback: center if no candidate worked
+    if (!placed) {
+      resolved.push({
+        ...img,
+        x: (matrixSize - img.width) / 2,
+        y: (matrixSize - img.height) / 2,
+      });
+    }
+  }
+
+  return [...manual, ...resolved];
+}
+
 // --- Main Function ---
 
 export function generateSVG(config: NewQRConfig): string {
@@ -171,7 +271,8 @@ export function generateSVG(config: NewQRConfig): string {
   const skipMatrix = Array(matrixSize)
     .fill(false)
     .map(() => Array(matrixSize).fill(false));
-  const images = config.images || [];
+  // Resolve auto-positions for images without explicit x/y
+  const images = resolveImagePositions(config.images || [], matrixSize);
 
   for (let y = 0; y < matrixSize; y++) {
     for (let x = 0; x < matrixSize; x++) {
@@ -180,8 +281,9 @@ export function generateSVG(config: NewQRConfig): string {
 
       const isBlocked = images.some((img) => {
         if (!img.excludeDots) return false;
-        const imgX = img.x ?? (matrixSize - img.width) / 2;
-        const imgY = img.y ?? (matrixSize - img.height) / 2;
+        // x/y are always resolved at this point
+        const imgX = img.x!;
+        const imgY = img.y!;
         return (
           x >= imgX - 0.5 &&
           x <= imgX + img.width - 0.5 &&
@@ -296,15 +398,17 @@ export function generateSVG(config: NewQRConfig): string {
     return config.background?.color || "white"; // default white
   };
 
-  // Images SVG
+  // Images SVG (x/y are always resolved by resolveImagePositions)
   let imagesSvg = "";
   images.forEach((img) => {
-    const imgX = (img.x ?? (matrixSize - img.width) / 2) + padding;
-    const imgY = (img.y ?? (matrixSize - img.height) / 2) + padding;
-    imagesSvg += `<image href="${img.source}" x="${imgX}" y="${imgY}" width="${img.width}" height="${img.height}" preserveAspectRatio="xMidYMid slice" />`;
+    const imgX = img.x! + padding;
+    const imgY = img.y! + padding;
+    const par = img.preserveAspectRatio ?? "xMidYMid meet";
+    const opacityAttr = img.opacity != null ? ` opacity="${img.opacity}"` : "";
+    imagesSvg += `<image href="${img.source}" x="${imgX}" y="${imgY}" width="${img.width}" height="${img.height}" preserveAspectRatio="${par}"${opacityAttr} />`;
   });
 
-  // Convert borderRadius from output pixels to SVG viewBox units
+  // Convert borderRadius from output pixels to SVG viewBox units (QR space)
   const borderRadius = config.borderRadius
     ? (config.borderRadius / w) * fullSize
     : 0;
@@ -315,19 +419,55 @@ export function generateSVG(config: NewQRConfig): string {
       : "";
   const clipAttr = borderRadius > 0 ? `clip-path="url(#qr-clip)"` : "";
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${fullSize} ${fullSize}" width="${w}" height="${h}">
+  // The inner QR SVG content (background + dots + eyes + logos)
+  const qrContent = `
     <defs>${defsString}${clipPathDef}</defs>
-    
     <g ${clipAttr}>
       <rect width="100%" height="100%" fill="${getBackgroundFill()}" ${rxAttr}/>
-      
       ${config.background?.image ? `<image href="${config.background.image}" width="100%" height="100%" preserveAspectRatio="none" />` : ""}
-      
       ${generateDotsLayer()}
       ${generateEyeLayer("cornerSquare", "grad-sq", config.cornersSquareOptions)}
       ${generateEyeLayer("cornerDot", "grad-dot", config.cornersDotOptions)}
-      
       ${imagesSvg}
-    </g>
+    </g>`;
+
+  // --- Frame composition ---
+  const frame = config.frame;
+
+  if (frame) {
+    // Resolve inset (where QR sits inside the frame), in frame pixels
+    const rawInset = frame.inset ?? {
+      width: frame.width * 0.8,
+      height: frame.height * 0.8,
+    };
+    const inset = {
+      width: rawInset.width,
+      height: rawInset.height,
+      // Auto-center if x/y not specified
+      x: rawInset.x ?? (frame.width - rawInset.width) / 2,
+      y: rawInset.y ?? (frame.height - rawInset.height) / 2,
+    };
+
+    // Output size: use frame dimensions unless overridden
+    const svgW = config.width ?? frame.width;
+    const svgH = config.height ?? frame.height;
+
+    // Scale factor: map QR fullSize units → inset pixel area
+    const scaleX = inset.width / fullSize;
+    const scaleY = inset.height / fullSize;
+
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${frame.width} ${frame.height}" width="${svgW}" height="${svgH}">
+      <!-- Frame image (behind everything) -->
+      <image href="${frame.source}" x="0" y="0" width="${frame.width}" height="${frame.height}" preserveAspectRatio="xMidYMid slice" />
+      <!-- QR code scaled into the inset area -->
+      <g transform="translate(${inset.x}, ${inset.y}) scale(${scaleX.toFixed(6)}, ${scaleY.toFixed(6)})">
+        ${qrContent}
+      </g>
+    </svg>`;
+  }
+
+  // --- No frame: standard output ---
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${fullSize} ${fullSize}" width="${w}" height="${h}">
+    ${qrContent}
   </svg>`;
 }

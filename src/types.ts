@@ -46,6 +46,8 @@ export type QrImage = {
   x?: number; // Position in modules. If omitted, calculated automatically (center)
   y?: number;
   excludeDots?: boolean; // If true, we won't draw QR dots under this image
+  opacity?: number; // 0.0 – 1.0 (default 1)
+  preserveAspectRatio?: string; // SVG preserveAspectRatio attr (default "xMidYMid meet")
 };
 
 export type QrPart = {
@@ -56,6 +58,22 @@ export type QrPart = {
   customIconViewBox?: string;
   scale?: number; // 0.1 ... 1.0 (Density)
   isSingle?: boolean; // Тільки для innerEye/cornersDot: малювати один великий елемент замість 3х3
+};
+
+// Frame: decorative image that wraps the QR code
+export type QrFrame = {
+  source: string; // URL or base64 of the frame image
+  width: number; // Total frame width in output pixels
+  height: number; // Total frame height in output pixels
+  // Where the QR sits inside the frame (in output pixels).
+  // If omitted entirely, QR is centered with 10% margin on each side.
+  // If only width/height are given (no x/y), QR is auto-centered.
+  inset?: {
+    x?: number; // Left edge of QR area (auto-centered if omitted)
+    y?: number; // Top edge of QR area (auto-centered if omitted)
+    width: number; // Width of QR area inside frame
+    height: number; // Height of QR area inside frame
+  };
 };
 
 // The Main Config
@@ -73,6 +91,7 @@ export interface NewQRConfig {
   };
 
   images?: QrImage[]; // Logos (Array)
+  frame?: QrFrame; // Decorative frame around the QR code
 
   qrOptions?: {
     typeNumber?: TypeNumber;
