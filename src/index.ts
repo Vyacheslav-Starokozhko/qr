@@ -1,6 +1,6 @@
 import { QRAnalyzer } from "./core/analyzer";
 import { shapes } from "./renderer/shapes";
-import { QRConfig, QrPart, QrImage, Gradient } from "./types";
+import { QRConfig, QrPart, QrImage, Gradient, QRLayoutShape } from "./types";
 import { detectFrameInset } from "./frame-inset";
 import { exportQR, ExportFormat, ExportOptions } from "./export";
 import { defaultOptions } from "./default";
@@ -13,6 +13,7 @@ export type {
   QrPart,
   QrImage,
   Gradient,
+  QRLayoutShape,
 };
 
 // --- Helpers ---
@@ -96,6 +97,18 @@ function createSymbol(id: string, part: QrPart): string {
           <path d="${part.customIconPath}" /> 
         </symbol>
       `;
+  } else if (part.shape !== "custom-icon") {
+    const shapeEntry = shapes[part.shape] || shapes["square"];
+    const d = typeof shapeEntry === "string" ? shapeEntry : shapeEntry.d;
+    const viewBox =
+      typeof shapeEntry === "string"
+        ? "0 0 24 24"
+        : shapeEntry.viewBox || "0 0 24 24";
+    return `
+        <symbol id="${id}" viewBox="${viewBox}">
+          <path d="${d}" />
+        </symbol>
+     `;
   }
   return "";
 }
@@ -366,7 +379,7 @@ export async function generateSVG(
   defsString += createSymbol("icon-dot", config.cornersDotOptions);
 
   // --- 2. DRAW LOOP ---
-  let paths = { dots: "", cornerSquare: "", cornerDot: "" };
+  // Store uses instead of paths
   let uses = { dots: "", cornerSquare: "", cornerDot: "" };
   const skipMatrix = Array(matrixSize)
     .fill(false)
@@ -410,8 +423,6 @@ export async function generateSVG(
 
       // Single Icon Logic
       let drawSize = 1;
-      let drawX = x + padding;
-      let drawY = y + padding;
 
       if (zone === "cornerDot" && partConfig.isSingle) {
         if (!isInnerEyeStart(x, y, matrixSize)) continue;
@@ -426,20 +437,26 @@ export async function generateSVG(
 
       const scale = partConfig.scale ?? 1;
 
-      if (partConfig.shape === "custom-icon") {
-        const w = drawSize * scale;
-        const h = drawSize * scale;
-        const offX = (drawSize - w) / 2;
-        const offY = (drawSize - h) / 2;
-        uses[zone] +=
-          `<use href="${symbolId}" x="${drawX + offX}" y="${drawY + offY}" width="${w}" height="${h}" />`;
-      } else {
-        // @ts-ignore
-        const drawFn = shapes[partConfig.shape] || shapes["square"];
-        if (drawSize === 3)
-          paths[zone] += drawFn(drawX + 1, drawY + 1, scale * 3) + " ";
-        else paths[zone] += drawFn(drawX, drawY, scale) + " ";
-      }
+      // Calculate position and size based on scale
+      // The symbol viewBox is 0 0 24 24 (or custom)
+      // We use 'x', 'y' to position the module in the QR grid
+      // We use 'width', 'height' to scale the symbol
+
+      const baseX = x + padding;
+      const baseY = y + padding;
+
+      // We want to center the scaled shape within the module(s)
+      // The module area is drawSize x drawSize (usually 1x1, or 3x3 for single inner eye)
+      // The shape size will be (drawSize * scale) x (drawSize * scale)
+      // Offset = (drawSize - shapeSize) / 2
+
+      const w = drawSize * scale;
+      const h = drawSize * scale;
+      const offX = (drawSize - w) / 2;
+      const offY = (drawSize - h) / 2;
+
+      uses[zone] +=
+        `<use href="${symbolId}" x="${baseX + offX}" y="${baseY + offY}" width="${w}" height="${h}" />`;
     }
   }
 
@@ -447,14 +464,17 @@ export async function generateSVG(
 
   // Dots Layer (Global Gradient)
   const generateDotsLayer = () => {
-    if (!paths.dots && !uses.dots) return "";
+    if (!uses.dots) return "";
     const fill = config.dotsOptions.gradient
       ? "url(#grad-dots)"
       : config.dotsOptions.color;
+    // Note: Masking complex groups of <use> might be heavy, but it's the only way to apply gradient to multiple <use> elements efficiently without individual gradients
+    // However, if we just want valid color, we can put fill on the group
+    // But for gradient we need mask or individual fill logic.
+    // The previous implementation used mask. Let's keep it.
     return `
         <mask id="mask-dots">
             <rect width="100%" height="100%" fill="black" />
-            <path d="${paths.dots}" fill="white" />
             <g fill="white">${uses.dots}</g>
         </mask>
         <rect width="100%" height="100%" fill="${fill}" mask="url(#mask-dots)" />
@@ -467,14 +487,13 @@ export async function generateSVG(
     gradPrefix: string,
     partConfig: QrPart,
   ) => {
-    if (!paths[key] && !uses[key]) return "";
+    if (!uses[key]) return "";
 
     const maskId = `mask-${key}`;
     const maskDef = `
         <mask id="${maskId}">
             <rect width="100%" height="100%" fill="black" />
-            <path d="${paths[key]}" fill="white" />
-            <g fill="white">${uses[key]}</g>
+            <g fill="white" shape-rendering="crispEdges">${uses[key]}</g>
         </mask>
       `;
 
@@ -484,9 +503,6 @@ export async function generateSVG(
       if (partConfig.gradient) {
         fill = `url(#${gradPrefix}-${eye.id})`;
       }
-      // Тут ми малюємо прямокутник 7x7 для всього ока.
-      // Це нормально, навіть для InnerDot, тому що userSpaceOnUse градієнт
-      // вже стиснутий до 3x3 всередині цього простору.
       rects += `<rect x="${eye.x}" y="${eye.y}" width="${eyeFrameSize}" height="${eyeFrameSize}" fill="${fill}" mask="url(#${maskId})" />`;
     });
     return `<defs>${maskDef}</defs>${rects}`;

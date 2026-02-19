@@ -20,12 +20,10 @@ export interface QRCell {
 
 export type QRMatrix = QRCell[][];
 
-export type AvailableShape = keyof typeof shapes | "custom-icon";
-
 export type TypeNumber = number;
 
 // Allowed shapes + custom-icon support
-export type QRLayoutShape = AvailableShape | "custom-icon";
+export type QRLayoutShape = keyof typeof shapes | "custom-icon";
 
 // QR Generation specific types (mapped to Nayuki's library later)
 export type ErrorCorrectionLevel = "L" | "M" | "Q" | "H";
