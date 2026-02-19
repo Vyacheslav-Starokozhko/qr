@@ -1,11 +1,19 @@
 import { QRAnalyzer } from "./core/analyzer";
 import { shapes } from "./renderer/shapes";
-import { NewQRConfig, QrPart, QrImage, QrFrame, Gradient } from "./types";
+import { QRConfig, QrPart, QrImage, Gradient } from "./types";
 import { detectFrameInset } from "./frame-inset";
 import { exportQR, ExportFormat, ExportOptions } from "./export";
+import { defaultOptions } from "./default";
 
 export { exportQR };
-export type { ExportFormat, ExportOptions };
+export type {
+  ExportFormat,
+  ExportOptions,
+  QRConfig,
+  QrPart,
+  QrImage,
+  Gradient,
+};
 
 // --- Helpers ---
 
@@ -259,8 +267,12 @@ export interface QRGenerateResult {
 }
 
 export async function generateSVG(
-  config: NewQRConfig,
+  options: QRConfig,
 ): Promise<QRGenerateResult> {
+  const config = {
+    ...defaultOptions,
+    ...options,
+  };
   const analyzer = new QRAnalyzer(
     config.data,
     config.qrOptions?.errorCorrectionLevel || "H",

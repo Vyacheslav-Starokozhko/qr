@@ -77,7 +77,7 @@ export type QrFrame = {
 };
 
 // The Main Config
-export interface NewQRConfig {
+export interface QRConfig {
   data: string;
   width?: number; // Output width in pixels (e.g. 1000)
   height?: number; // Output height in pixels
@@ -100,7 +100,7 @@ export interface NewQRConfig {
   };
 
   // Granular styling
-  dotsOptions: QrPart; // The main data
-  cornersDotOptions: QrPart; // Inner Eye (Ball)
-  cornersSquareOptions: QrPart; // Outer Eye (Frame)
+  dotsOptions?: QrPart; // The main data
+  cornersDotOptions?: QrPart; // Inner Eye (Ball)
+  cornersSquareOptions?: QrPart; // Outer Eye (Frame)
 }
