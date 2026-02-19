@@ -1,6 +1,11 @@
 import { QRAnalyzer } from "./core/analyzer";
 import { shapes } from "./renderer/shapes";
 import { NewQRConfig, QrPart, QrImage, QrFrame, Gradient } from "./types";
+import { detectFrameInset } from "./frame-inset";
+import { exportQR, ExportFormat, ExportOptions } from "./export";
+
+export { exportQR };
+export type { ExportFormat, ExportOptions };
 
 // --- Helpers ---
 
@@ -89,9 +94,17 @@ function createSymbol(id: string, part: QrPart): string {
 
 // --- Auto-layout for images without explicit x/y ---
 
+/** Returns the 3 eye zones (7×7 blocks) in matrix coordinates (no padding). */
+function getEyeZones(matrixSize: number) {
+  return [
+    { id: "top-left", x: 0, y: 0 },
+    { id: "top-right", x: matrixSize - 7, y: 0 },
+    { id: "bottom-left", x: 0, y: matrixSize - 7 },
+  ];
+}
+
 /**
  * Returns true if a rectangle [rx, ry, rw, rh] overlaps any of the 3 eye zones.
- * Eye zones are 7×7 blocks at TL, TR, BL corners of the matrix (0-indexed, no padding).
  */
 function overlapsEye(
   rx: number,
@@ -100,32 +113,78 @@ function overlapsEye(
   rh: number,
   matrixSize: number,
 ): boolean {
-  const eyes = [
-    { x: 0, y: 0 },
-    { x: matrixSize - 7, y: 0 },
-    { x: 0, y: matrixSize - 7 },
-  ];
-  for (const e of eyes) {
-    const overlapX = rx < e.x + 7 && rx + rw > e.x;
-    const overlapY = ry < e.y + 7 && ry + rh > e.y;
-    if (overlapX && overlapY) return true;
+  for (const e of getEyeZones(matrixSize)) {
+    if (rx < e.x + 7 && rx + rw > e.x && ry < e.y + 7 && ry + rh > e.y)
+      return true;
   }
   return false;
 }
 
 /**
+ * If a manually-positioned image overlaps an eye zone, push it to the nearest
+ * safe side and log a console.warn with the original vs adjusted coordinates.
+ */
+function clampImageFromEyes(
+  img: import("./types").QrImage,
+  imgIndex: number,
+  matrixSize: number,
+): import("./types").QrImage {
+  let x = img.x!;
+  let y = img.y!;
+
+  for (const e of getEyeZones(matrixSize)) {
+    const overlapX = x < e.x + 7 && x + img.width > e.x;
+    const overlapY = y < e.y + 7 && y + img.height > e.y;
+    if (!overlapX || !overlapY) continue;
+
+    // Find the axis with the smallest penetration depth and push out
+    const opts = [
+      { axis: "x" as const, dir: 1, depth: e.x + 7 - x },
+      { axis: "x" as const, dir: -1, depth: x + img.width - e.x },
+      { axis: "y" as const, dir: 1, depth: e.y + 7 - y },
+      { axis: "y" as const, dir: -1, depth: y + img.height - e.y },
+    ]
+      .filter((o) => o.depth > 0)
+      .sort((a, b) => a.depth - b.depth);
+
+    if (!opts.length) continue;
+    const fix = opts[0];
+    const origX = x;
+    const origY = y;
+
+    if (fix.axis === "x") x = fix.dir > 0 ? e.x + 7 : e.x - img.width;
+    else y = fix.dir > 0 ? e.y + 7 : e.y - img.height;
+
+    console.warn(
+      `[QR] images[${imgIndex}] overlaps the "${e.id}" eye zone. ` +
+        `Auto-adjusted: (${origX.toFixed(1)}, ${origY.toFixed(1)}) → (${x.toFixed(1)}, ${y.toFixed(1)}).`,
+    );
+  }
+
+  return { ...img, x, y };
+}
+
+/**
  * Resolves x/y for images that don't have explicit coordinates.
- * Images with x/y set are returned unchanged.
+ * Manually-placed images are validated and clamped away from eye zones.
  * Auto-positioned images are distributed in the data zone avoiding eye areas.
  */
 function resolveImagePositions(
   images: import("./types").QrImage[],
   matrixSize: number,
 ): import("./types").QrImage[] {
-  const manual = images.filter((img) => img.x != null && img.y != null);
+  const manualRaw = images.filter((img) => img.x != null && img.y != null);
   const auto = images.filter((img) => img.x == null || img.y == null);
 
-  if (auto.length === 0) return images;
+  // Protect manually-placed images from overlapping eye zones
+  const manual = manualRaw.map((img) => {
+    const globalIdx = images.indexOf(img);
+    return overlapsEye(img.x!, img.y!, img.width, img.height, matrixSize)
+      ? clampImageFromEyes(img, globalIdx, matrixSize)
+      : img;
+  });
+
+  if (auto.length === 0) return [...manual];
 
   // Data zone bounds (inside the eye-free area)
   const dataStart = 8; // leave 1 module gap after eye zone (7+1)
@@ -189,7 +248,19 @@ function resolveImagePositions(
 
 // --- Main Function ---
 
-export function generateSVG(config: NewQRConfig): string {
+export interface QRGenerateResult {
+  svg: string;
+  matrixSize: number;
+  eyeZones: QREyeZone[];
+  getMaxPos: (
+    imageWidth: number,
+    imageHeight: number,
+  ) => { maxX: number; maxY: number };
+}
+
+export async function generateSVG(
+  config: NewQRConfig,
+): Promise<QRGenerateResult> {
   const analyzer = new QRAnalyzer(
     config.data,
     config.qrOptions?.errorCorrectionLevel || "H",
@@ -197,6 +268,23 @@ export function generateSVG(config: NewQRConfig): string {
   const matrix = analyzer.getMatrix();
   const matrixSize = matrix.length;
   const padding = config.padding ?? 4;
+
+  // Pre-build bounds (returned alongside svg)
+  const _eyeZones: QREyeZone[] = getEyeZones(matrixSize).map((e) => ({
+    ...e,
+    width: 7,
+    height: 7,
+  }));
+  const _getMaxPos = (iw: number, ih: number) => ({
+    maxX: Math.max(0, matrixSize - iw),
+    maxY: Math.max(0, matrixSize - ih),
+  });
+  const makeBounds = (svg: string): QRGenerateResult => ({
+    svg,
+    matrixSize,
+    eyeZones: _eyeZones,
+    getMaxPos: _getMaxPos,
+  });
 
   const fullSize = matrixSize + padding * 2;
   const w = config.width ?? 1000;
@@ -436,17 +524,37 @@ export function generateSVG(config: NewQRConfig): string {
 
   if (frame) {
     // Resolve inset (where QR sits inside the frame), in frame pixels
-    const rawInset = frame.inset ?? {
-      width: frame.width * 0.8,
-      height: frame.height * 0.8,
-    };
-    const inset = {
-      width: rawInset.width,
-      height: rawInset.height,
-      // Auto-center if x/y not specified
-      x: rawInset.x ?? (frame.width - rawInset.width) / 2,
-      y: rawInset.y ?? (frame.height - rawInset.height) / 2,
-    };
+    const userInset = frame.inset;
+    const needsAutoPosition =
+      !userInset || userInset.x == null || userInset.y == null;
+
+    // Detect the hole in the frame whenever we need auto-positioning
+    let detectedZone = needsAutoPosition
+      ? await detectFrameInset(frame.source, frame.width, frame.height)
+      : null;
+
+    // Fallback detected zone: 80% centered
+    if (needsAutoPosition && !detectedZone) {
+      const fw = frame.width * 0.8;
+      const fh = frame.height * 0.8;
+      detectedZone = {
+        x: (frame.width - fw) / 2,
+        y: (frame.height - fh) / 2,
+        width: fw,
+        height: fh,
+      };
+    }
+
+    // Final dimensions — prefer user-specified, else use detected
+    const iw = userInset?.width ?? detectedZone!.width;
+    const ih = userInset?.height ?? detectedZone!.height;
+
+    // Final position — if x/y given use them; otherwise center within detected zone
+    const ix = userInset?.x ?? detectedZone!.x + (detectedZone!.width - iw) / 2;
+    const iy =
+      userInset?.y ?? detectedZone!.y + (detectedZone!.height - ih) / 2;
+
+    const inset = { x: ix, y: iy, width: iw, height: ih };
 
     // Output size: use frame dimensions unless overridden
     const svgW = config.width ?? frame.width;
@@ -456,18 +564,77 @@ export function generateSVG(config: NewQRConfig): string {
     const scaleX = inset.width / fullSize;
     const scaleY = inset.height / fullSize;
 
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${frame.width} ${frame.height}" width="${svgW}" height="${svgH}">
+    return makeBounds(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${frame.width} ${frame.height}" width="${svgW}" height="${svgH}">
       <!-- Frame image (behind everything) -->
       <image href="${frame.source}" x="0" y="0" width="${frame.width}" height="${frame.height}" preserveAspectRatio="xMidYMid slice" />
       <!-- QR code scaled into the inset area -->
       <g transform="translate(${inset.x}, ${inset.y}) scale(${scaleX.toFixed(6)}, ${scaleY.toFixed(6)})">
         ${qrContent}
       </g>
-    </svg>`;
+    </svg>`);
   }
 
   // --- No frame: standard output ---
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${fullSize} ${fullSize}" width="${w}" height="${h}">
+  return makeBounds(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${fullSize} ${fullSize}" width="${w}" height="${h}">
     ${qrContent}
-  </svg>`;
+  </svg>`);
+}
+
+// --- UI Utilities ---
+
+export interface QREyeZone {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface QRBounds {
+  /** Size of the QR matrix in modules (e.g. 31 for a version-3 QR) */
+  matrixSize: number;
+  /** The 3 eye (finder pattern) zones in module coordinates */
+  eyeZones: QREyeZone[];
+  /**
+   * Returns the maximum allowed top-left position for an image of the given size,
+   * so it stays fully inside the QR area.
+   *   maxX = matrixSize - imageWidth
+   *   maxY = matrixSize - imageHeight
+   * Use these as the upper bound for your x/y position inputs.
+   */
+  getMaxPos: (
+    imageWidth: number,
+    imageHeight: number,
+  ) => { maxX: number; maxY: number };
+}
+
+/**
+ * Returns bounds information for constraining image position inputs in a UI.
+ *
+ * @example
+ * const { matrixSize, eyeZones, getMaxPos } = getQRBounds('https://example.com');
+ * const { maxX, maxY } = getMaxPos(imageWidth, imageHeight);
+ * // Use maxX / maxY as slider/input max values
+ */
+export function getQRBounds(
+  data: string,
+  errorCorrectionLevel: "L" | "M" | "Q" | "H" = "H",
+): QRBounds {
+  const analyzer = new QRAnalyzer(data, errorCorrectionLevel);
+  const matrixSize = analyzer.getMatrix().length;
+
+  const eyeZones: QREyeZone[] = getEyeZones(matrixSize).map((e) => ({
+    ...e,
+    width: 7,
+    height: 7,
+  }));
+
+  return {
+    matrixSize,
+    eyeZones,
+    getMaxPos: (imageWidth: number, imageHeight: number) => ({
+      maxX: Math.max(0, matrixSize - imageWidth),
+      maxY: Math.max(0, matrixSize - imageHeight),
+    }),
+  };
 }
