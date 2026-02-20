@@ -5,7 +5,7 @@ import { detectFrameInset } from "./frame-inset";
 import { exportQR, FileExtension, ExportOptions } from "./export";
 import { defaultOptions } from "./default";
 
-export { exportQR };
+export { exportQR, QRShapes };
 export type {
   FileExtension,
   ExportOptions,
@@ -14,7 +14,6 @@ export type {
   QrImage,
   Gradient,
   QRShapesType,
-  QRShapes,
 };
 
 // --- Helpers ---
