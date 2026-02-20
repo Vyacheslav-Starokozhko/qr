@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { generateSVG } from "../src/index";
+import { QRCodeGenerate } from "../src/index";
 import sharp from "sharp";
 import jsQR from "jsqr";
 
@@ -21,7 +21,7 @@ describe("QR Reliability Test", () => {
   it("should be readable with hearts shape", async () => {
     const text = "https://github.com/my-lib";
 
-    const svg = generateSVG({
+    const svg = QRCodeGenerate({
       text: text,
       shape: "heart", // Testing our hearts
       color: "#000000",
@@ -44,7 +44,7 @@ describe("QR Reliability Test", () => {
       "M24.906 35.295a12.548 12.548 0 0 1-4.153-2.425c-2.545-2.244-4.152-5.517-4.152-9.152V8.906c0-1.482 1.012-2.782 2.466-3.17L24.12 4.4a.623.623 0 0 1 .785.592v18.72c0 3.635 1.608 6.901 4.153 9.152a12.564 12.564 0 0 1-4.153 2.431Z"; // ...shortened
     const fullWLogo = path1 + " " + path2; // Just concatenating
 
-    const svg = generateSVG({
+    const svg = QRCodeGenerate({
       text: text,
       shape: "custom-icon",
       color: "#000000",
@@ -59,7 +59,7 @@ describe("QR Reliability Test", () => {
   });
 
   it("fails on low contrast", async () => {
-    const svg = generateSVG({
+    const svg = QRCodeGenerate({
       text: "fail",
       color: "#FFFFFF", // White on white
       bgColor: "#FFFFFF",

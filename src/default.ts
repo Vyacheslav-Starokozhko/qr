@@ -1,18 +1,27 @@
-import { QRConfig } from "./types";
+import { Options } from "./types";
 
 export const defaultOptions: Required<
-  Pick<QRConfig, "dotsOptions" | "cornersDotOptions" | "cornersSquareOptions">
+  Pick<
+    Options,
+    | "dotsOptions"
+    | "cornersDotOptions"
+    | "cornersSquareOptions"
+    | "backgroundOptions"
+  >
 > = {
+  backgroundOptions: {
+    color: "#ffffff",
+  },
   dotsOptions: {
-    shape: "square",
+    type: "inner-eye-square",
     color: "#000000",
   },
   cornersDotOptions: {
-    shape: "square",
+    type: "inner-eye-square",
     color: "#000000",
   },
   cornersSquareOptions: {
-    shape: "square",
+    type: "inner-eye-square",
     color: "#000000",
   },
 };

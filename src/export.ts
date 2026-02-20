@@ -1,6 +1,6 @@
 import sharp from "sharp";
 
-export type ExportFormat = "svg" | "png" | "jpeg" | "webp";
+export type FileExtension = "svg" | "png" | "jpeg" | "webp";
 
 export interface ExportOptions {
   /** Output width in pixels. Defaults to the SVG's own width attribute. */
@@ -15,13 +15,13 @@ export interface ExportOptions {
  * Converts an SVG string to the requested format and returns a Buffer.
  *
  * @example
- * const { svg } = await generateSVG({ ... });
+ * const { svg } = await QRCodeGenerate({ ... });
  * const pngBuf = await exportQR(svg, 'png', { width: 1000 });
  * fs.writeFileSync('qr.png', pngBuf);
  */
 export async function exportQR(
   svg: string,
-  format: ExportFormat,
+  format: FileExtension,
   options: ExportOptions = {},
 ): Promise<Buffer> {
   if (format === "svg") {

@@ -1,19 +1,20 @@
 import { QRAnalyzer } from "./core/analyzer";
-import { shapes } from "./renderer/shapes";
-import { QRConfig, QrPart, QrImage, Gradient, QRLayoutShape } from "./types";
+import { QRShapes, shapes } from "./renderer/shapes";
+import { Options, QrPart, QrImage, Gradient, QRShapesType } from "./types";
 import { detectFrameInset } from "./frame-inset";
-import { exportQR, ExportFormat, ExportOptions } from "./export";
+import { exportQR, FileExtension, ExportOptions } from "./export";
 import { defaultOptions } from "./default";
 
 export { exportQR };
 export type {
-  ExportFormat,
+  FileExtension,
   ExportOptions,
-  QRConfig,
+  Options,
   QrPart,
   QrImage,
   Gradient,
-  QRLayoutShape,
+  QRShapesType,
+  QRShapes,
 };
 
 // --- Helpers ---
@@ -91,14 +92,14 @@ function generateGradientDef(
 }
 
 function createSymbol(id: string, part: QrPart): string {
-  if (part.shape === "custom-icon" && part.customIconPath) {
+  if (part.type === "custom-icon" && part.customPath) {
     return `
-        <symbol id="${id}" viewBox="${part.customIconViewBox || "0 0 24 24"}">
-          <path d="${part.customIconPath}" /> 
+        <symbol id="${id}" viewBox="${part.customViewBox || "0 0 24 24"}">
+          <path d="${part.customPath}" /> 
         </symbol>
       `;
-  } else if (part.shape !== "custom-icon") {
-    const shapeEntry = shapes[part.shape] || shapes["square"];
+  } else if (part.type !== "custom-icon") {
+    const shapeEntry = shapes[part.type!] || shapes["inner-eye-square"];
     const d = typeof shapeEntry === "string" ? shapeEntry : shapeEntry.d;
     const viewBox =
       typeof shapeEntry === "string"
@@ -279,8 +280,8 @@ export interface QRGenerateResult {
   ) => { maxX: number; maxY: number };
 }
 
-export async function generateSVG(
-  options: QRConfig,
+export async function QRCodeGenerate(
+  options: Options,
 ): Promise<QRGenerateResult> {
   const config = {
     ...defaultOptions,
@@ -292,7 +293,7 @@ export async function generateSVG(
   );
   const matrix = analyzer.getMatrix();
   const matrixSize = matrix.length;
-  const padding = config.padding ?? 4;
+  const margin = config.margin ?? 4;
 
   // Pre-build bounds (returned alongside svg)
   const _eyeZones: QREyeZone[] = getEyeZones(matrixSize).map((e) => ({
@@ -311,11 +312,11 @@ export async function generateSVG(
     getMaxPos: _getMaxPos,
   });
 
-  const fullSize = matrixSize + padding * 2;
+  const fullSize = matrixSize + margin * 2;
   const w = config.width ?? 1000;
   const h = config.height ?? 1000;
 
-  const eyes = getEyePositions(matrixSize, padding);
+  const eyes = getEyePositions(matrixSize, margin);
   const eyeFrameSize = 7; // Зовнішня рамка
   const eyeDotSize = 3; // Внутрішній центр (серце)
 
@@ -323,10 +324,10 @@ export async function generateSVG(
   let defsString = "";
 
   // A. Background Gradient (FIXED)
-  if (config.background?.gradient) {
+  if (config.backgroundOptions?.gradient) {
     defsString += generateGradientDef(
       "grad-bg",
-      config.background.gradient,
+      config.backgroundOptions.gradient,
       0,
       0,
       fullSize,
@@ -442,8 +443,8 @@ export async function generateSVG(
       // We use 'x', 'y' to position the module in the QR grid
       // We use 'width', 'height' to scale the symbol
 
-      const baseX = x + padding;
-      const baseY = y + padding;
+      const baseX = x + margin;
+      const baseY = y + margin;
 
       // We want to center the scaled shape within the module(s)
       // The module area is drawSize x drawSize (usually 1x1, or 3x3 for single inner eye)
@@ -510,15 +511,15 @@ export async function generateSVG(
 
   // Background Fill Logic (Color OR Gradient)
   const getBackgroundFill = () => {
-    if (config.background?.gradient) return "url(#grad-bg)";
-    return config.background?.color || "white"; // default white
+    if (config.backgroundOptions?.gradient) return "url(#grad-bg)";
+    return config.backgroundOptions?.color || "white"; // default white
   };
 
   // Images SVG (x/y are always resolved by resolveImagePositions)
   let imagesSvg = "";
   images.forEach((img) => {
-    const imgX = img.x! + padding;
-    const imgY = img.y! + padding;
+    const imgX = img.x! + margin;
+    const imgY = img.y! + margin;
     const par = img.preserveAspectRatio ?? "xMidYMid meet";
     const opacityAttr = img.opacity != null ? ` opacity="${img.opacity}"` : "";
     imagesSvg += `<image href="${img.source}" x="${imgX}" y="${imgY}" width="${img.width}" height="${img.height}" preserveAspectRatio="${par}"${opacityAttr} />`;
@@ -540,7 +541,7 @@ export async function generateSVG(
     <defs>${defsString}${clipPathDef}</defs>
     <g ${clipAttr}>
       <rect width="100%" height="100%" fill="${getBackgroundFill()}" ${rxAttr}/>
-      ${config.background?.image ? `<image href="${config.background.image}" width="100%" height="100%" preserveAspectRatio="none" />` : ""}
+      ${config.backgroundOptions?.image ? `<image href="${config.backgroundOptions.image}" width="100%" height="100%" preserveAspectRatio="none" />` : ""}
       ${generateDotsLayer()}
       ${generateEyeLayer("cornerSquare", "grad-sq", config.cornersSquareOptions)}
       ${generateEyeLayer("cornerDot", "grad-dot", config.cornersDotOptions)}

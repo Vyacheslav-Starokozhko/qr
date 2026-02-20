@@ -1,4 +1,4 @@
-const svgWithFrame = await generateSVG({
+const svgWithFrame = await QRCodeGenerate({
     data: "https://wiki.org",
     padding: 1,
     width: 500,
@@ -132,4 +132,4 @@ const svgWithFrame = await generateSVG({
 const { maxX, maxY } = getMaxPos(3, 3);
 
 
-const { matrixSize, eyeZones, getMaxPos,svgWithFrame } = await generateSVG({...})
+const { matrixSize, eyeZones, getMaxPos,svgWithFrame } = await QRCodeGenerate({...})

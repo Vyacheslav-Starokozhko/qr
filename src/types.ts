@@ -1,4 +1,4 @@
-import { shapes } from "./renderer/shapes";
+import { QRShapes, shapes } from "./renderer/shapes";
 
 export type QRErrorCorrectionLevel = "L" | "M" | "Q" | "H";
 
@@ -23,7 +23,7 @@ export type QRMatrix = QRCell[][];
 export type TypeNumber = number;
 
 // Allowed shapes + custom-icon support
-export type QRLayoutShape = keyof typeof shapes | "custom-icon";
+export type QRShapesType = keyof typeof shapes | "custom-icon";
 
 // QR Generation specific types (mapped to Nayuki's library later)
 export type ErrorCorrectionLevel = "L" | "M" | "Q" | "H";
@@ -49,11 +49,11 @@ export type QrImage = {
 };
 
 export type QrPart = {
-  shape: QRLayoutShape;
-  color: string;
+  type?: QRShapesType;
+  color?: string;
   gradient?: Gradient;
-  customIconPath?: string;
-  customIconViewBox?: string;
+  customPath?: string;
+  customViewBox?: string;
   scale?: number; // 0.1 ... 1.0 (Density)
   isSingle?: boolean; // Тільки для innerEye/cornersDot: малювати один великий елемент замість 3х3
 };
@@ -75,15 +75,15 @@ export type QrFrame = {
 };
 
 // The Main Config
-export interface QRConfig {
+export interface Options {
   data: string;
   width?: number; // Output width in pixels (e.g. 1000)
   height?: number; // Output height in pixels
-  padding?: number; // Padding in modules (default 4)
+  margin?: number; // Padding in modules (default 4)
   borderRadius?: number; // Corner radius in pixels for the entire QR code
 
-  background?: {
-    color: string;
+  backgroundOptions?: {
+    color?: string;
     gradient?: Gradient;
     image?: string; // URL for background image
   };
