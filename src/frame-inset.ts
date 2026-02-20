@@ -11,8 +11,6 @@
  * stack algorithm. Total complexity: O(w × h).
  */
 
-import sharp from "sharp";
-
 export interface FrameInset {
   x: number;
   y: number;
@@ -25,21 +23,53 @@ const ALPHA_THRESHOLD = 128;
 /** Pixels with luminance above this (0-255) are considered "empty" */
 const LUMA_THRESHOLD = 240;
 
-/** Decode a source string (data URI or file path) to a raw RGBA buffer */
-async function toRawRGBA(
-  source: string,
-): Promise<{ data: Buffer; width: number; height: number }> {
-  let input: Buffer | string;
+/** Decode a source string (data URI or file path) to a raw RGBA array */
+async function toRawRGBA(source: string): Promise<{
+  data: Uint8Array | Uint8ClampedArray;
+  width: number;
+  height: number;
+}> {
+  if (typeof window !== "undefined" && typeof document !== "undefined") {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "Anonymous";
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return reject(new Error("Canvas 2D not supported"));
+        ctx.drawImage(img, 0, 0);
+        const imageData = ctx.getImageData(0, 0, img.width, img.height);
+        resolve({
+          data: imageData.data,
+          width: img.width,
+          height: img.height,
+        });
+      };
+      img.onerror = reject;
+      img.src = source;
+    });
+  }
 
+  let input: any;
   if (source.startsWith("data:")) {
-    // data:image/png;base64,XXXX
     const commaIdx = source.indexOf(",");
     const b64 = source.slice(commaIdx + 1);
-    input = Buffer.from(b64, "base64");
+    input = typeof Buffer !== "undefined" ? Buffer.from(b64, "base64") : source;
   } else {
     input = source; // file path
   }
 
+  let sharp: any;
+  try {
+    const sharpModule = await import("sharp");
+    sharp = sharpModule.default || sharpModule;
+  } catch (err) {
+    throw new Error(
+      "The 'sharp' package is required for frame detection in Node.js.",
+    );
+  }
   const { data, info } = await sharp(input)
     .ensureAlpha()
     .raw()
@@ -49,7 +79,7 @@ async function toRawRGBA(
 }
 
 /** Returns true if the pixel at offset `i` (RGBA) is considered "empty" */
-function isEmpty(data: Buffer, i: number): boolean {
+function isEmpty(data: Uint8Array | Uint8ClampedArray, i: number): boolean {
   const a = data[i + 3];
   if (a < ALPHA_THRESHOLD) return true;
   // Weighted luminance for non-transparent pixels
