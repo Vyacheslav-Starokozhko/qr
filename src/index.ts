@@ -343,7 +343,7 @@ export async function QRCodeGenerate(
     ...options,
   };
   const analyzer = new QRAnalyzer(
-    config.data,
+    config.data ?? "",
     config.qrOptions?.errorCorrectionLevel || "H",
   );
   const matrix = analyzer.getMatrix();
@@ -499,9 +499,12 @@ export async function QRCodeGenerate(
           const eyeKey = `sq-${origin.ex}-${origin.ey}`;
           if (!drawnEyes.has(eyeKey)) {
             drawnEyes.add(eyeKey);
-            const drawer =
-              cornerSquares[shapePath] ?? cornerSquares["square"];
-            pathsD.cornerSquare += drawer(origin.ex + margin, origin.ey + margin, 7);
+            const drawer = cornerSquares[shapePath] ?? cornerSquares["square"];
+            pathsD.cornerSquare += drawer(
+              origin.ex + margin,
+              origin.ey + margin,
+              7,
+            );
           }
         } else {
           // cornerDot — always draw as one 3×3 block per eye

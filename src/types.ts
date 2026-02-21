@@ -62,9 +62,9 @@ export type FigureShape =
 export type QrShape = {
   type: ShapeType;
   path?: QRShapesType | FigureShape; // icon key or figure name
-  viewBox?: string;                   // auto-detected for icon shapes
-  customPath?: string;                // only for "custom-icon"
-  customViewBox?: string;             // only for "custom-icon"
+  viewBox?: string; // auto-detected for icon shapes
+  customPath?: string; // only for "custom-icon"
+  customViewBox?: string; // only for "custom-icon"
 };
 
 export type QrPart = {
@@ -93,7 +93,7 @@ export type QrFrame = {
 
 // The Main Config
 export interface Options {
-  data: string;
+  data?: string;
   width?: number; // Output width in pixels (e.g. 1000)
   height?: number; // Output height in pixels
   margin?: number; // Padding in modules (default 4)
