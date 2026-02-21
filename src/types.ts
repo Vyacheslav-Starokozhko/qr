@@ -1,4 +1,4 @@
-import { QRShapes, shapes } from "./renderer/shapes";
+import { QRShapes, shapes } from "./renderer/icons";
 
 export type QRErrorCorrectionLevel = "L" | "M" | "Q" | "H";
 
@@ -30,7 +30,7 @@ export type ErrorCorrectionLevel = "L" | "M" | "Q" | "H";
 export type Mode = "Numeric" | "Alphanumeric" | "Byte" | "Kanji";
 export type Gradient = {
   type: "linear" | "radial";
-  rotation?: number; // у градусах, для linear
+  rotation?: number; // in degrees, for linear
   colorStops: {
     offset: string; // "0%", "100%"
     color: string;
@@ -48,14 +48,31 @@ export type QrImage = {
   preserveAspectRatio?: string; // SVG preserveAspectRatio attr (default "xMidYMid meet")
 };
 
+export type ShapeType = "custom-icon" | "icon" | "figure";
+
+export type FigureShape =
+  | "square"
+  | "dot"
+  | "dots"
+  | "extra-rounded"
+  | "rounded"
+  | "classy"
+  | "classy-rounded";
+
+export type QrShape = {
+  type: ShapeType;
+  path?: QRShapesType | FigureShape; // icon key or figure name
+  viewBox?: string;                   // auto-detected for icon shapes
+  customPath?: string;                // only for "custom-icon"
+  customViewBox?: string;             // only for "custom-icon"
+};
+
 export type QrPart = {
-  type?: QRShapesType;
+  shape?: QrShape;
   color?: string;
   gradient?: Gradient;
-  customPath?: string;
-  customViewBox?: string;
   scale?: number; // 0.1 ... 1.0 (Density)
-  isSingle?: boolean; // Тільки для innerEye/cornersDot: малювати один великий елемент замість 3х3
+  isSingle?: boolean; // Only for innerEye/cornersDot: draw one large element instead of 3×3
 };
 
 // Frame: decorative image that wraps the QR code

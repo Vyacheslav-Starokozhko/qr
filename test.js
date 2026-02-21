@@ -47,7 +47,7 @@ const fullWLogo = path1 + " " + path2; // Just concatenating
       inset: { width: 500, height: 500 },
     },
     // --- Background ---
-    background: {
+    backgroundOptions: {
       // Dark background so white dots are visible
       color: "#1a1a2e",
       // Uncomment to use a full-bleed background image instead:
@@ -110,19 +110,20 @@ const fullWLogo = path1 + " " + path2; // Just concatenating
       },
     ],
 
-    // 1. DOTS — use a simple square type with visible color
+    // 1. DOTS
     dotsOptions: {
-      // type: "square",
+      shape: {
+        type: "custom-icon",
+        customPath: fullWLogo,
+        customViewBox: "0 0 41 36",
+      },
       color: "#e0e0e0",
       scale: 0.85,
-      // To use custom-icon type, uncomment below and comment out type/color above:
-      type: "qr-duck",
-      // color: "white",
     },
 
     // 2. CORNER SQUARE (outer eye frame)
     cornersSquareOptions: {
-      type: "dots-extra-rounded",
+      shape: { type: "icon", path: "outer-eye-dots" },
       color: "black",
       gradient: {
         type: "linear",
@@ -136,9 +137,9 @@ const fullWLogo = path1 + " " + path2; // Just concatenating
 
     // 3. CORNER DOT (inner eye ball)
     cornersDotOptions: {
-      type: "",
-      // customIconPath: fullWLogo,
-      // customIconViewBox: "0 0 41 36",
+      shape: { type: "icon", path: "inner-eye-dots" },
+      // Example custom-icon:
+      // shape: { type: "custom-icon", customPath: fullWLogo, customViewBox: "0 0 41 36" },
       gradient: {
         type: "linear",
         rotation: 90,
@@ -153,7 +154,7 @@ const fullWLogo = path1 + " " + path2; // Just concatenating
   });
   fs.writeFileSync("output-frame.svg", svgWithFrame);
   console.log(
-    `Frame demo written to output-frame.svg (matrixSize: ${matrixSize})`,
+    `Frame demo written to output-frame.svg (matrixSize: ${matrixSize})`
   );
   console.log("Eye zones:", JSON.stringify(eyeZones));
   console.log("Max pos for 5x5 image:", getMaxPos(5, 5));

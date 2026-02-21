@@ -1,6 +1,6 @@
 {
   "name": "qrstylelib",
-  "version": "1.0.4",
+  "version": "1.0.3",
   "description": "",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

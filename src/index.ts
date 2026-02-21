@@ -1,6 +1,18 @@
 import { QRAnalyzer } from "./core/analyzer";
-import { QRShapes, shapes } from "./renderer/shapes";
-import { Options, QrPart, QrImage, Gradient, QRShapesType } from "./types";
+import { QRShapes, shapes } from "./renderer/icons";
+import { neighborShapes, Neighbors } from "./renderer/dots";
+import { cornerDots } from "./renderer/cornerDot";
+import { cornerSquares } from "./renderer/cornerSquare";
+import {
+  Options,
+  QrPart,
+  QrShape,
+  ShapeType,
+  FigureShape,
+  QrImage,
+  Gradient,
+  QRShapesType,
+} from "./types";
 import { detectFrameInset } from "./frame-inset";
 import { exportQR, FileExtension, ExportOptions } from "./export";
 import { defaultOptions } from "./default";
@@ -11,6 +23,9 @@ export type {
   ExportOptions,
   Options,
   QrPart,
+  QrShape,
+  ShapeType,
+  FigureShape,
   QrImage,
   Gradient,
   QRShapesType,
@@ -56,7 +71,7 @@ function isInnerEyeStart(x: number, y: number, size: number): boolean {
   return positions.some((p) => p.x === x && p.y === y);
 }
 
-// Генератор градієнтів з прив'язкою до конкретної зони (bx, by, bw, bh)
+// Gradient generator bound to a specific zone (bx, by, bw, bh)
 function generateGradientDef(
   id: string,
   grad: Gradient,
@@ -71,11 +86,11 @@ function generateGradientDef(
 
   const angle = (grad.rotation || 0) * (Math.PI / 180);
 
-  // Центр зони
+  // Zone center
   const cx = bx + bw / 2;
   const cy = by + bh / 2;
 
-  // Радіус (половина діагоналі)
+  // Radius (half the diagonal)
   const r = Math.sqrt(bw * bw + bh * bh) / 2;
 
   const x1 = (cx - r * Math.cos(angle)).toFixed(2);
@@ -91,25 +106,33 @@ function generateGradientDef(
 }
 
 function createSymbol(id: string, part: QrPart): string {
-  if (part.type === "custom-icon" && part.customPath) {
+  const shape = part.shape;
+  if (!shape) return "";
+
+  if (shape.type === "figure") {
+    return "";
+  }
+
+  if (shape.type === "custom-icon" && shape.customPath) {
     return `
-        <symbol id="${id}" viewBox="${part.customViewBox || "0 0 24 24"}">
-          <path d="${part.customPath}" /> 
+        <symbol id="${id}" viewBox="${shape.customViewBox || "0 0 24 24"}">
+          <path d="${shape.customPath}" />
         </symbol>
       `;
-  } else if (part.type !== "custom-icon") {
-    const shapeEntry = shapes[part.type!] || shapes["inner-eye-square"];
-    const d = typeof shapeEntry === "string" ? shapeEntry : shapeEntry.d;
-    const viewBox =
-      typeof shapeEntry === "string"
-        ? "0 0 24 24"
-        : shapeEntry.viewBox || "0 0 24 24";
+  }
+
+  if (shape.type === "icon" && shape.path) {
+    const shapeEntry =
+      shapes[shape.path as keyof typeof shapes] || shapes["inner-eye-square"];
+    const d = shapeEntry.d;
+    const viewBox = shape.viewBox || shapeEntry.viewBox || "0 0 24 24";
     return `
         <symbol id="${id}" viewBox="${viewBox}">
           <path d="${d}" />
         </symbol>
-     `;
+      `;
   }
+
   return "";
 }
 
@@ -267,6 +290,39 @@ function resolveImagePositions(
   return [...manual, ...resolved];
 }
 
+// --- Figure helpers ---
+
+function getNeighbors(
+  x: number,
+  y: number,
+  matrix: import("./types").QRMatrix,
+  size: number,
+): Neighbors {
+  return {
+    t: y > 0 && matrix[y - 1][x]?.isDark,
+    r: x < size - 1 && matrix[y][x + 1]?.isDark,
+    b: y < size - 1 && matrix[y + 1][x]?.isDark,
+    l: x > 0 && matrix[y][x - 1]?.isDark,
+  };
+}
+
+/** Return the top-left corner of the eye (finder pattern) that contains (x, y). */
+function getEyeOrigin(
+  x: number,
+  y: number,
+  size: number,
+): { ex: number; ey: number } | null {
+  const origins = [
+    { ex: 0, ey: 0 },
+    { ex: size - 7, ey: 0 },
+    { ex: 0, ey: size - 7 },
+  ];
+  for (const o of origins) {
+    if (x >= o.ex && x < o.ex + 7 && y >= o.ey && y < o.ey + 7) return o;
+  }
+  return null;
+}
+
 // --- Main Function ---
 
 export interface QRGenerateResult {
@@ -316,8 +372,8 @@ export async function QRCodeGenerate(
   const h = config.height ?? 1000;
 
   const eyes = getEyePositions(matrixSize, margin);
-  const eyeFrameSize = 7; // Зовнішня рамка
-  const eyeDotSize = 3; // Внутрішній центр (серце)
+  const eyeFrameSize = 7; // Outer frame
+  const eyeDotSize = 3; // Inner center (ball)
 
   // --- 1. SETUP DEFS ---
   let defsString = "";
@@ -348,7 +404,7 @@ export async function QRCodeGenerate(
 
   // C. Independent Eye Gradients (FIXED LOGIC)
   eyes.forEach((eye) => {
-    // 1. Градієнт для рамки (Corner Square) - розмір 7x7
+    // 1. Gradient for the frame (Corner Square) - size 7×7
     if (config.cornersSquareOptions.gradient) {
       defsString += generateGradientDef(
         `grad-sq-${eye.id}`,
@@ -360,8 +416,8 @@ export async function QRCodeGenerate(
       );
     }
 
-    // 2. Градієнт для центру (Corner Dot) - розмір 3x3 (FIXED)
-    // Важливо: ми додаємо зсув +2, щоб градієнт був стиснутий саме навколо серця
+    // 2. Gradient for the center (Corner Dot) - size 3×3 (FIXED)
+    // The +2 offset keeps the gradient tight around the ball area
     if (config.cornersDotOptions.gradient) {
       defsString += generateGradientDef(
         `grad-dot-${eye.id}`,
@@ -379,11 +435,17 @@ export async function QRCodeGenerate(
   defsString += createSymbol("icon-dot", config.cornersDotOptions);
 
   // --- 2. DRAW LOOP ---
-  // Store uses instead of paths
+  // <use> elements for icon/custom-icon shapes
   let uses = { dots: "", cornerSquare: "", cornerDot: "" };
+  // Accumulated SVG path data for figure shapes
+  let pathsD = { dots: "", cornerSquare: "", cornerDot: "" };
+
   const skipMatrix = Array(matrixSize)
     .fill(false)
     .map(() => Array(matrixSize).fill(false));
+  // Tracks which eyes have already been drawn for figure-type eye zones
+  const drawnEyes = new Set<string>();
+
   // Resolve auto-positions for images without explicit x/y
   const images = resolveImagePositions(config.images || [], matrixSize);
 
@@ -394,7 +456,6 @@ export async function QRCodeGenerate(
 
       const isBlocked = images.some((img) => {
         if (!img.excludeDots) return false;
-        // x/y are always resolved at this point
         const imgX = img.x!;
         const imgY = img.y!;
         return (
@@ -421,7 +482,46 @@ export async function QRCodeGenerate(
         symbolId = "#icon-dot";
       }
 
-      // Single Icon Logic
+      // Default to figure/square when no shape is specified
+      const shapeType = partConfig.shape?.type ?? "figure";
+      const shapePath = partConfig.shape?.path ?? "square";
+      const scale = partConfig.scale ?? 1;
+
+      // --- Figure rendering (math paths) ---
+      if (shapeType === "figure") {
+        if (zone === "dots") {
+          const neighbors = getNeighbors(x, y, matrix, matrixSize);
+          const drawer = neighborShapes[shapePath] ?? neighborShapes["square"];
+          pathsD.dots += drawer(x + margin, y + margin, neighbors, scale);
+        } else if (zone === "cornerSquare") {
+          const origin = getEyeOrigin(x, y, matrixSize);
+          if (!origin) continue;
+          const eyeKey = `sq-${origin.ex}-${origin.ey}`;
+          if (!drawnEyes.has(eyeKey)) {
+            drawnEyes.add(eyeKey);
+            const drawer =
+              cornerSquares[shapePath] ?? cornerSquares["square"];
+            pathsD.cornerSquare += drawer(origin.ex + margin, origin.ey + margin, 7);
+          }
+        } else {
+          // cornerDot — always draw as one 3×3 block per eye
+          const origin = getEyeOrigin(x, y, matrixSize);
+          if (!origin) continue;
+          const eyeKey = `dot-${origin.ex}-${origin.ey}`;
+          if (!drawnEyes.has(eyeKey)) {
+            drawnEyes.add(eyeKey);
+            const drawer = cornerDots[shapePath] ?? cornerDots["square"];
+            pathsD.cornerDot += drawer(
+              origin.ex + 2 + margin,
+              origin.ey + 2 + margin,
+              3,
+            );
+          }
+        }
+        continue;
+      }
+
+      // --- Icon / custom-icon rendering (<use> + <symbol>) ---
       let drawSize = 1;
 
       if (zone === "cornerDot" && partConfig.isSingle) {
@@ -435,65 +535,63 @@ export async function QRCodeGenerate(
         }
       }
 
-      const scale = partConfig.scale ?? 1;
-
-      // Calculate position and size based on scale
-      // The symbol viewBox is 0 0 24 24 (or custom)
-      // We use 'x', 'y' to position the module in the QR grid
-      // We use 'width', 'height' to scale the symbol
-
       const baseX = x + margin;
       const baseY = y + margin;
 
-      // We want to center the scaled shape within the module(s)
-      // The module area is drawSize x drawSize (usually 1x1, or 3x3 for single inner eye)
-      // The shape size will be (drawSize * scale) x (drawSize * scale)
-      // Offset = (drawSize - shapeSize) / 2
-
-      const w = drawSize * scale;
-      const h = drawSize * scale;
-      const offX = (drawSize - w) / 2;
-      const offY = (drawSize - h) / 2;
+      const sw = drawSize * scale;
+      const sh = drawSize * scale;
+      const offX = (drawSize - sw) / 2;
+      const offY = (drawSize - sh) / 2;
 
       uses[zone] +=
-        `<use href="${symbolId}" x="${baseX + offX}" y="${baseY + offY}" width="${w}" height="${h}" />`;
+        `<use href="${symbolId}" x="${baseX + offX}" y="${baseY + offY}" width="${sw}" height="${sh}" />`;
     }
   }
 
   // --- 3. FINAL ASSEMBLY ---
 
-  // Dots Layer (Global Gradient)
+  // Dots Layer (Global Gradient) — combines icon <use> elements and figure <path> data
   const generateDotsLayer = () => {
-    if (!uses.dots) return "";
+    const hasUses = !!uses.dots;
+    const hasPaths = !!pathsD.dots;
+    if (!hasUses && !hasPaths) return "";
+
     const fill = config.dotsOptions.gradient
       ? "url(#grad-dots)"
       : config.dotsOptions.color;
-    // Note: Masking complex groups of <use> might be heavy, but it's the only way to apply gradient to multiple <use> elements efficiently without individual gradients
-    // However, if we just want valid color, we can put fill on the group
-    // But for gradient we need mask or individual fill logic.
-    // The previous implementation used mask. Let's keep it.
+
+    const maskContent =
+      (hasUses ? uses.dots : "") +
+      (hasPaths ? `<path d="${pathsD.dots}" />` : "");
+
     return `
         <mask id="mask-dots">
             <rect width="100%" height="100%" fill="black" />
-            <g fill="white">${uses.dots}</g>
+            <g fill="white">${maskContent}</g>
         </mask>
         <rect width="100%" height="100%" fill="${fill}" mask="url(#mask-dots)" />
       `;
   };
 
-  // Eyes Layer (Independent Gradients)
+  // Eyes Layer (Independent Gradients) — combines icon <use> elements and figure <path> data
   const generateEyeLayer = (
     key: "cornerSquare" | "cornerDot",
     gradPrefix: string,
     partConfig: QrPart,
   ) => {
-    if (!uses[key]) return "";
+    const hasUses = !!uses[key];
+    const hasPaths = !!pathsD[key];
+    if (!hasUses && !hasPaths) return "";
 
     const maskId = `mask-${key}`;
+    const maskContent =
+      (hasUses ? uses[key] : "") +
+      (hasPaths ? `<path d="${pathsD[key]}" />` : "");
+
     const maskDef = `
         <mask id="${maskId}">
             <rect width="100%" height="100%" fill="black" />
-            <g fill="white" shape-rendering="crispEdges">${uses[key]}</g>
+            <g fill="white" shape-rendering="crispEdges">${maskContent}</g>
         </mask>
       `;
 

@@ -13,15 +13,15 @@ export const defaultOptions: Required<
     color: "#ffffff",
   },
   dotsOptions: {
-    type: "inner-eye-square",
+    shape: { type: "icon", path: "dots-square" },
     color: "#000000",
   },
   cornersDotOptions: {
-    type: "inner-eye-square",
+    shape: { type: "icon", path: "inner-eye-square" },
     color: "#000000",
   },
   cornersSquareOptions: {
-    type: "inner-eye-square",
+    shape: { type: "icon", path: "outer-eye-square" },
     color: "#000000",
   },
 };
