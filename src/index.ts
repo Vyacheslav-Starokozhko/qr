@@ -17,23 +17,6 @@ import { exportQR, FileExtension, ExportOptions } from "./export";
 import { defaultOptions } from "./default";
 
 export { exportQR, QRShapes };
-// export type {
-//   FileExtension,
-//   ExportOptions,
-//   Options,
-//   QrPart,
-//   QrShape,
-//   ShapeType,
-//   FigureShape,
-//   QrImage,
-//   QrImagePosition,
-//   Gradient,
-//   QRShapesType,
-//   DotFigure,
-//   CornerSquareFigure,
-//   CornerDotFigure,
-//   QrFrame,
-// };
 
 export * from "./types";
 

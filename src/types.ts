@@ -1,6 +1,4 @@
-import { QRShapes, shapes } from "./renderer/icons";
-
-export type QRErrorCorrectionLevel = "L" | "M" | "Q" | "H";
+import { shapes } from "./renderer/icons";
 
 export type ModuleType =
   | "data"
@@ -65,6 +63,7 @@ export type QrImage = {
   margin?: number; // Outer margin in modules — expands the dot-clearing zone around the image
   opacity?: number; // 0.0 – 1.0 (default 1)
   preserveAspectRatio?: string; // SVG preserveAspectRatio attr (default "xMidYMid meet")
+  name?: string; // Optional name for the image
 };
 
 export type ShapeType = "custom-icon" | "icon" | "figure";
@@ -179,4 +178,54 @@ export interface Options {
   dotsOptions?: QrPartOptions; // The main data
   cornersDotOptions?: QrPartOptions; // Inner Eye (Ball)
   cornersSquareOptions?: QrPartOptions; // Outer Eye (Frame)
+}
+
+export enum EShapeType {
+  ICON = "icon",
+  FIGURE = "figure",
+  CUSTOM_ICON = "custom-icon",
+}
+
+export enum EQrPart {
+  DOTS = "dotsOptions",
+  CORNERS_DOT = "cornersDotOptions",
+  CORNERS_SQUARE = "cornersSquareOptions",
+}
+
+export enum EFigureShape {
+  SQUARE = "square",
+  DOT = "dot",
+  DOTS = "dots",
+  EXTRA_ROUNDED = "extra-rounded",
+  ROUNDED = "rounded",
+  CLASSY = "classy",
+  CLASSY_ROUNDED = "classy-rounded",
+}
+
+export enum EDotFigure {
+  SQUARE = "square",
+  DOTS = "dots",
+  EXTRA_ROUNDED = "extra-rounded",
+  ROUNDED = "rounded",
+  CLASSY = "classy",
+  CLASSY_ROUNDED = "classy-rounded",
+}
+
+export enum ECornerSquareFigure {
+  SQUARE = "square",
+  DOT = "dot",
+  DOTS = "dots",
+  EXTRA_ROUNDED = "extra-rounded",
+  ROUNDED = "rounded",
+  CLASSY = "classy",
+  CLASSY_ROUNDED = "classy-rounded",
+}
+
+export enum ECornerDotFigure {
+  SQUARE = "square",
+  DOT = "dot",
+  DOTS = "dots",
+  CLASSY = "classy",
+  ROUNDED = "rounded",
+  CLASSY_ROUNDED = "classy-rounded",
 }
