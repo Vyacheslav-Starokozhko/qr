@@ -423,11 +423,16 @@ export async function scanQR(
     let canvas: HTMLCanvasElement;
 
     if (typeof context === "string") {
+      if (typeof document === "undefined") {
+        throw new Error(
+          "scanQR() requires a browser environment (document is not defined)",
+        );
+      }
       const wMatch = context.match(/\bwidth="([\d.]+)"/);
       const hMatch = context.match(/\bheight="([\d.]+)"/);
       const w = wMatch ? parseFloat(wMatch[1]) : 1000;
       const h = hMatch ? parseFloat(hMatch[1]) : 1000;
-      canvas = await svgToCanvas(context, w, h);
+      canvas = (await svgToCanvas(context, w, h)) as HTMLCanvasElement;
     } else {
       canvas = context;
     }
@@ -471,14 +476,16 @@ interface QRGenerateResultBase {
 
 export interface QRGenerateResult extends QRGenerateResultBase {
   svg: string;
-  canvas: HTMLCanvasElement;
+  /** Rendered canvas. `null` in non-browser environments (Node.js). */
+  canvas: HTMLCanvasElement | null;
 }
 
 async function svgToCanvas(
   svg: string,
   width: number,
   height: number,
-): Promise<HTMLCanvasElement> {
+): Promise<HTMLCanvasElement | null> {
+  if (typeof document === "undefined") return null;
   return new Promise((resolve, reject) => {
     const canvas = document.createElement("canvas");
     canvas.width = width;
@@ -848,6 +855,244 @@ export async function QRCodeGenerate(
       ${imagesSvg}
     </g>`;
 
+  // --- Frame label renderer ---
+  /**
+   * Renders a QrLabel as SVG text (+ optional background rect + defs) placed
+   * inside the outer frame coordinate space (frame pixels, not QR modules).
+   *
+   * Position semantics:
+   *   top    – strip above QR inset, full frame width, bottom margin toward QR
+   *   bottom – strip below QR inset, full frame width, top margin toward QR
+   *   center – inside QR inset, text centred
+   *   custom – label.x / label.y are the text centre point (frame px)
+   *   auto   – picks top or bottom strip based on which has more vertical space;
+   *            label width = 100 % of that strip's width
+   *
+   * Text is auto-sized (fontSize derived from zone height) unless label.fontSize
+   * is provided.  textLength + lengthAdjust ensure the text fills the label width.
+   */
+  function renderFrameLabel(
+    label: import("./types").QrLabel,
+    inset: { x: number; y: number; width: number; height: number },
+    frameW: number,
+    frameH: number,
+  ): string {
+    if (!label.text) return "";
+    const text = label.text;
+    const gapMargin = label.margin ?? 8;
+    const pos = label.position ?? "bottom";
+
+    // ── Zone: area allocated for the label (frame-px coords) ──────────────────
+    // For top / bottom / auto we use the full frame width so the label is
+    // horizontally centred across the whole frame (common in real frame designs).
+    let zoneX: number;
+    let zoneY: number;
+    let zoneW: number;
+    let zoneH: number;
+    // Margins on each vertical side (gap toward the QR edge)
+    let mTop: number;
+    let mBottom: number;
+    // Where the text anchors within the zone:
+    //   "qr"     → adjacent to the QR code (bottom of top-strip / top of bottom-strip)
+    //   "center" → vertically centred (used for "center" and "custom")
+    let vAnchor: "qr" | "center" = "qr";
+
+    switch (pos) {
+      case "top":
+        zoneX = inset.x;
+        zoneY = 0;
+        zoneW = inset.width;
+        zoneH = inset.y;
+        mTop = gapMargin * 0.3;
+        mBottom = gapMargin;
+        vAnchor = "qr"; // snap to bottom of zone (near QR top edge)
+        break;
+
+      case "center":
+        zoneX = inset.x;
+        zoneY = inset.y;
+        zoneW = inset.width;
+        zoneH = inset.height;
+        mTop = gapMargin;
+        mBottom = gapMargin;
+        vAnchor = "center";
+        break;
+
+      case "auto": {
+        const topH = inset.y;
+        const bottomH = frameH - (inset.y + inset.height);
+        if (topH >= bottomH) {
+          zoneX = inset.x; zoneY = 0;
+          zoneW = inset.width; zoneH = topH;
+          mTop = gapMargin * 0.3; mBottom = gapMargin;
+          vAnchor = "qr"; // bottom of top-strip → adjacent to QR
+        } else {
+          zoneX = inset.x; zoneY = inset.y + inset.height;
+          zoneW = inset.width; zoneH = bottomH;
+          mTop = gapMargin; mBottom = gapMargin * 0.3;
+          vAnchor = "qr"; // top of bottom-strip → adjacent to QR
+        }
+        break;
+      }
+
+      case "custom": {
+        const customW = label.width ?? inset.width;
+        const cx = label.x ?? inset.x + inset.width / 2;
+        const cy = label.y ?? inset.y + inset.height + gapMargin + 20;
+        const estimatedH = (label.fontSize ?? 24) * 1.4;
+        zoneX = cx - customW / 2;
+        zoneY = cy - estimatedH / 2;
+        zoneW = customW;
+        zoneH = estimatedH;
+        mTop = 0; mBottom = 0;
+        vAnchor = "center";
+        break;
+      }
+
+      case "bottom":
+      default:
+        zoneX = inset.x;
+        zoneY = inset.y + inset.height;
+        zoneW = inset.width;
+        zoneH = frameH - (inset.y + inset.height);
+        mTop = gapMargin;
+        mBottom = gapMargin * 0.3;
+        vAnchor = "qr"; // snap to top of zone (near QR bottom edge)
+        break;
+    }
+
+    // ── Available dimensions inside the zone ──────────────────────────────────
+    const availH = zoneH - mTop - mBottom;
+    const availW = zoneW - gapMargin * 2;
+    if (availH <= 0 || availW <= 0) return "";
+
+    // Label width: explicit value capped to available, or fill available
+    const labelW = label.width != null ? Math.min(label.width, availW) : availW;
+
+    // ── Font size ─────────────────────────────────────────────────────────────
+    // Three independent upper bounds — take the minimum:
+    //  1. frameH × 7 % — keeps the label proportional to the overall frame
+    //     regardless of how tall the free zone happens to be
+    //  2. availH × 0.5 — never taller than half the zone (padding room)
+    //  3. labelW / (chars × 0.6) — estimated natural character width cap,
+    //     prevents excessive horizontal compression on long strings
+    // Average character width ≈ fontSize × 0.6 for a typical sans-serif.
+    const CHAR_RATIO = 0.6;
+    const maxFontByFrame = frameH * 0.07;
+    const maxFontByHeight = availH * 0.5;
+    const maxFontByWidth = labelW / (Math.max(1, text.length) * CHAR_RATIO);
+    const fontSize =
+      label.fontSize != null
+        ? label.fontSize
+        : Math.max(
+            8,
+            Math.min(maxFontByFrame, maxFontByHeight, maxFontByWidth),
+          );
+
+    // ── Text anchor point (centre of the text rect) ───────────────────────────
+    let textCX: number;
+    let textCY: number;
+
+    textCX = zoneX + zoneW / 2;
+
+    if (pos === "custom") {
+      textCX = label.x ?? inset.x + inset.width / 2;
+      textCY = label.y ?? inset.y + inset.height + gapMargin + fontSize / 2;
+    } else if (vAnchor === "center") {
+      // Vertically centred inside the zone
+      textCY = zoneY + mTop + availH / 2;
+    } else {
+      // "qr" anchor: snap text to the QR-adjacent edge of the zone
+      // top-strip  → text sits at the bottom (near QR top edge): zoneY + zoneH - mBottom - fontSize/2
+      // bottom-strip → text sits at the top (near QR bottom edge): zoneY + mTop + fontSize/2
+      const nearBottom = pos === "top" || (pos === "auto" && zoneY === 0);
+      textCY = nearBottom
+        ? zoneY + zoneH - mBottom - fontSize / 2
+        : zoneY + mTop + fontSize / 2;
+    }
+
+    // ── textLength — overflow protection only, never stretch ──────────────────
+    // Only applied when the estimated natural width exceeds labelW (compress to fit).
+    // Short / medium text is centred at its natural width without distortion.
+    const estimatedNaturalW = text.length * fontSize * CHAR_RATIO;
+    const clampText = estimatedNaturalW > labelW;
+
+    // ── Background rect ───────────────────────────────────────────────────────
+    // Width: full zone width for strip positions (top/bottom/auto) so the
+    // colour band spans edge-to-edge like a real frame label.
+    // Height: always tight around the text (fontSize + vertical padding) —
+    // never the full zone height, which could cover the whole frame image.
+    const isStrip = pos === "top" || pos === "bottom" || pos === "auto";
+    const bgPadY = fontSize * 0.2;
+    const bgPadX = fontSize * 0.3;
+    const bgX = isStrip ? zoneX : textCX - labelW / 2 - bgPadX;
+    const bgY = textCY - fontSize / 2 - bgPadY;
+    const bgW = isStrip ? zoneW : labelW + bgPadX * 2;
+    const bgH = fontSize + bgPadY * 2;
+
+    let defsStr = "";
+    let bgStr = "";
+
+    if (label.fontBackgroundGradient) {
+      defsStr += generateGradientDef(
+        "grad-label-bg",
+        label.fontBackgroundGradient,
+        bgX,
+        bgY,
+        bgW,
+        bgH,
+      );
+      bgStr = `<rect x="${bgX.toFixed(2)}" y="${bgY.toFixed(2)}" width="${bgW.toFixed(2)}" height="${bgH.toFixed(2)}" fill="url(#grad-label-bg)" />`;
+    } else if (label.fontBackgroundColor) {
+      bgStr = `<rect x="${bgX.toFixed(2)}" y="${bgY.toFixed(2)}" width="${bgW.toFixed(2)}" height="${bgH.toFixed(2)}" fill="${label.fontBackgroundColor}" />`;
+    }
+
+    // ── Text fill (solid colour or gradient) ──────────────────────────────────
+    const textGradW = clampText ? labelW : estimatedNaturalW;
+    let textFill: string;
+    if (label.fontGradient) {
+      defsStr += generateGradientDef(
+        "grad-label-text",
+        label.fontGradient,
+        textCX - textGradW / 2,
+        textCY - fontSize / 2,
+        textGradW,
+        fontSize,
+      );
+      textFill = "url(#grad-label-text)";
+    } else {
+      textFill = label.fontColor ?? "#000000";
+    }
+
+    // ── Build <text> element ──────────────────────────────────────────────────
+    const textAttrs: string[] = [
+      `x="${textCX.toFixed(2)}"`,
+      `y="${textCY.toFixed(2)}"`,
+      `text-anchor="middle"`,
+      `dominant-baseline="central"`,
+      `font-size="${fontSize.toFixed(2)}"`,
+      `font-family="${label.fontFamily ?? "sans-serif"}"`,
+    ];
+    if (label.fontWeight != null)
+      textAttrs.push(`font-weight="${label.fontWeight}"`);
+    if (label.fontStyle) textAttrs.push(`font-style="${label.fontStyle}"`);
+    textAttrs.push(`fill="${textFill}"`);
+    // Apply textLength only to compress overflowing text (never to expand short text)
+    if (clampText) {
+      textAttrs.push(`textLength="${labelW.toFixed(2)}"`);
+      textAttrs.push(`lengthAdjust="spacingAndGlyphs"`);
+    }
+
+    const escaped = text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
+    const defsBlock = defsStr ? `<defs>${defsStr}</defs>` : "";
+    return `${defsBlock}${bgStr}<text ${textAttrs.join(" ")}>${escaped}</text>`;
+  }
+
   // --- Frame composition ---
   const frame = config.frame;
 
@@ -893,6 +1138,10 @@ export async function QRCodeGenerate(
     const scaleX = inset.width / fullSize;
     const scaleY = inset.height / fullSize;
 
+    const labelSvg = frame.label
+      ? renderFrameLabel(frame.label, inset, frame.width, frame.height)
+      : "";
+
     return finalizeResult(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${frame.width} ${frame.height}" width="${svgW}" height="${svgH}">
       <!-- Frame image (behind everything) -->
       <image href="${frame.source}" x="0" y="0" width="${frame.width}" height="${frame.height}" preserveAspectRatio="xMidYMid slice" />
@@ -900,6 +1149,7 @@ export async function QRCodeGenerate(
       <g transform="translate(${inset.x}, ${inset.y}) scale(${scaleX.toFixed(6)}, ${scaleY.toFixed(6)})">
         ${qrContent}
       </g>
+      ${labelSvg}
     </svg>`);
   }
 

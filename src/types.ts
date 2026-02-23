@@ -9,12 +9,12 @@ export type ModuleType =
   | "dark-module"
   | "version";
 
-export interface QRCell {
+export type QRCell = {
   x: number;
   y: number;
   isDark: boolean;
   type: ModuleType;
-}
+};
 
 export type QRMatrix = QRCell[][];
 
@@ -123,6 +123,35 @@ export type QrPart =
   | "cornersDotOptions"
   | "cornersSquareOptions";
 
+export type QrLabelPosition = "top" | "bottom" | "center" | "custom" | "auto";
+
+export type QrLabel = {
+  text?: string;
+  fontSize?: number; // px in frame coordinates; auto-computed from zone height when omitted
+  fontWeight?: number;
+  fontStyle?: string;
+  fontFamily?: string;
+  fontColor?: string;
+  fontGradient?: Gradient;
+  fontBackgroundColor?: string;
+  fontBackgroundGradient?: Gradient;
+  position?: QrLabelPosition;
+  /**
+   * Gap (in frame px) between the label and the adjacent QR edge.
+   * - top/bottom: space between text rect and the nearest QR border
+   * - center: inner padding from the inset edges
+   * - auto: same as top/bottom, applied to the winning strip
+   * Defaults to 8.
+   */
+  margin?: number;
+  /** Explicit text width (frame px). When omitted the label fills the zone width. */
+  width?: number;
+  /** Center X for "custom" position (frame px). Defaults to frame horizontal center. */
+  x?: number;
+  /** Center Y for "custom" position (frame px). Defaults to below QR + margin. */
+  y?: number;
+};
+
 // Frame: decorative image that wraps the QR code
 export type QrFrame = {
   source: string; // URL or base64 of the frame image
@@ -137,10 +166,11 @@ export type QrFrame = {
     width: number; // Width of QR area inside frame
     height: number; // Height of QR area inside frame
   };
+  label?: QrLabel;
 };
 
 // QR Scan result returned by the scan() method on QRGenerateResult
-export interface QRScanState {
+export type QRScanState = {
   /** Whether the scan operation is still in progress */
   inProgress: boolean;
   /** true when a QR code was successfully decoded */
@@ -149,10 +179,10 @@ export interface QRScanState {
   error: string;
   /** The decoded QR data string, or null if scan failed */
   data: string | null;
-}
+};
 
 // The Main Config
-export interface Options {
+export type Options = {
   data?: string;
   width?: number; // Output width in pixels (e.g. 1000)
   height?: number; // Output height in pixels
@@ -178,7 +208,7 @@ export interface Options {
   dotsOptions?: QrPartOptions; // The main data
   cornersDotOptions?: QrPartOptions; // Inner Eye (Ball)
   cornersSquareOptions?: QrPartOptions; // Outer Eye (Frame)
-}
+};
 
 export enum EShapeType {
   ICON = "icon",
@@ -228,4 +258,25 @@ export enum ECornerDotFigure {
   CLASSY = "classy",
   ROUNDED = "rounded",
   CLASSY_ROUNDED = "classy-rounded",
+}
+
+export enum EQrImagePosition {
+  CENTER = "center",
+  TOP = "top",
+  RIGHT = "right",
+  BOTTOM = "bottom",
+  LEFT = "left",
+  EXTRA_TOP = "extra-top",
+  EXTRA_BOTTOM = "extra-bottom",
+  EXTRA_LEFT = "extra-left",
+  EXTRA_RIGHT = "extra-right",
+  CUSTOM = "custom",
+}
+
+export enum EQrLabelPosition {
+  TOP = "top",
+  BOTTOM = "bottom",
+  CENTER = "center",
+  CUSTOM = "custom",
+  AUTO = "auto",
 }

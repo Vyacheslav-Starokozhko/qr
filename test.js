@@ -45,6 +45,16 @@ const fullWLogo = path1 + " " + path2; // Just concatenating
       width: 1000,
       height: 1000,
       inset: { width: 500, height: 500 },
+      label: {
+        text: "SCAN ME",
+        position: "top", // auto-detects the largest free strip
+        fontFamily: "Arial, sans-serif",
+        fontWeight: 700,
+        fontColor: "#ffffff",
+        fontBackgroundColor: "#1a1a2e",
+        margin: 12,
+        // fontSize: 48,            // omit → auto-sized from zone height
+      },
     },
     // --- Background ---
     backgroundOptions: {
