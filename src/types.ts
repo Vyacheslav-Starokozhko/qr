@@ -60,7 +60,7 @@ export type FigureShape =
   | "classy-rounded";
 
 export type QrShape = {
-  type: ShapeType;
+  type?: ShapeType;
   path?: QRShapesType | FigureShape; // icon key or figure name
   viewBox?: string; // auto-detected for icon shapes
   customPath?: string; // only for "custom-icon"
