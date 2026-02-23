@@ -111,13 +111,18 @@ export type QrShape = {
   customViewBox?: string; // only for "custom-icon"
 };
 
-export type QrPart = {
+export type QrPartOptions = {
   shape?: QrShape;
   color?: string;
   gradient?: Gradient;
   scale?: number; // 0.1 ... 1.0 (Density)
   isSingle?: boolean; // Only for innerEye/cornersDot: draw one large element instead of 3×3
 };
+
+export type QrPart =
+  | "dotsOptions"
+  | "cornersDotOptions"
+  | "cornersSquareOptions";
 
 // Frame: decorative image that wraps the QR code
 export type QrFrame = {
@@ -134,6 +139,18 @@ export type QrFrame = {
     height: number; // Height of QR area inside frame
   };
 };
+
+// QR Scan result returned by the scan() method on QRGenerateResult
+export interface QRScanState {
+  /** Whether the scan operation is still in progress */
+  inProgress: boolean;
+  /** true when a QR code was successfully decoded */
+  result: boolean;
+  /** Non-empty string when an error occurred */
+  error: string;
+  /** The decoded QR data string, or null if scan failed */
+  data: string | null;
+}
 
 // The Main Config
 export interface Options {
@@ -159,7 +176,7 @@ export interface Options {
   };
 
   // Granular styling
-  dotsOptions?: QrPart; // The main data
-  cornersDotOptions?: QrPart; // Inner Eye (Ball)
-  cornersSquareOptions?: QrPart; // Outer Eye (Frame)
+  dotsOptions?: QrPartOptions; // The main data
+  cornersDotOptions?: QrPartOptions; // Inner Eye (Ball)
+  cornersSquareOptions?: QrPartOptions; // Outer Eye (Frame)
 }

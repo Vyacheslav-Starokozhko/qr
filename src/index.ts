@@ -1,9 +1,17 @@
+import jsQR from "jsqr";
 import { QRAnalyzer } from "./core/analyzer";
 import { QRShapes, shapes } from "./renderer/icons";
 import { neighborShapes, Neighbors } from "./renderer/dots";
 import { cornerDots } from "./renderer/cornerDot";
 import { cornerSquares } from "./renderer/cornerSquare";
-import { Options, QrPart, QrImage, QrImagePosition, Gradient } from "./types";
+import {
+  Options,
+  QrPartOptions,
+  QrImage,
+  QrImagePosition,
+  Gradient,
+  QRScanState,
+} from "./types";
 import { detectFrameInset } from "./frame-inset";
 import { exportQR, FileExtension, ExportOptions } from "./export";
 import { defaultOptions } from "./default";
@@ -103,7 +111,7 @@ function generateGradientDef(
     `;
 }
 
-function createSymbol(id: string, part: QrPart): string {
+function createSymbol(id: string, part: QrPartOptions): string {
   const shape = part.shape;
   if (!shape) return "";
 
@@ -409,16 +417,108 @@ function getEyeOrigin(
   return null;
 }
 
+// --- jsQR ---
+
+/**
+ * Scans an SVG string or an existing HTMLCanvasElement for a QR code.
+ *
+ * - **SVG string**: rendered to an off-screen canvas using the dimensions
+ *   embedded in the SVG `width`/`height` attributes (fallback 1000×1000).
+ * - **HTMLCanvasElement**: read directly via `getImageData`.
+ *
+ * The returned {@link QRScanState} always settles (`inProgress: false`).
+ * Errors are surfaced through the `error` field rather than thrown.
+ *
+ * @example
+ * const { svg } = await QRCodeGenerate({ data: "https://example.com" });
+ * const { result, data, error } = await scanQR(svg);
+ */
+export async function scanQR(
+  context: string | HTMLCanvasElement,
+): Promise<QRScanState> {
+  try {
+    let canvas: HTMLCanvasElement;
+
+    if (typeof context === "string") {
+      const wMatch = context.match(/\bwidth="([\d.]+)"/);
+      const hMatch = context.match(/\bheight="([\d.]+)"/);
+      const w = wMatch ? parseFloat(wMatch[1]) : 1000;
+      const h = hMatch ? parseFloat(hMatch[1]) : 1000;
+      canvas = await svgToCanvas(context, w, h);
+    } else {
+      canvas = context;
+    }
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Could not get 2D context from canvas");
+
+    const { width, height } = canvas;
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const code = jsQR(imageData.data, width, height);
+
+    if (code) {
+      return { inProgress: false, result: true, error: "", data: code.data };
+    }
+    return {
+      inProgress: false,
+      result: false,
+      error: "No QR code found in the image",
+      data: null,
+    };
+  } catch (err) {
+    return {
+      inProgress: false,
+      result: false,
+      error: err instanceof Error ? err.message : String(err),
+      data: null,
+    };
+  }
+}
+
 // --- Main Function ---
 
-export interface QRGenerateResult {
-  svg: string;
+interface QRGenerateResultBase {
   matrixSize: number;
   eyeZones: QREyeZone[];
   getMaxPos: (
     imageWidth: number,
     imageHeight: number,
   ) => { maxX: number; maxY: number };
+}
+
+export interface QRGenerateResult extends QRGenerateResultBase {
+  svg: string;
+  canvas: HTMLCanvasElement;
+}
+
+async function svgToCanvas(
+  svg: string,
+  width: number,
+  height: number,
+): Promise<HTMLCanvasElement> {
+  return new Promise((resolve, reject) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      reject(new Error("Could not get 2D context from canvas"));
+      return;
+    }
+    const img = new Image();
+    const blob = new Blob([svg], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    img.onload = () => {
+      ctx.drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(url);
+      resolve(canvas);
+    };
+    img.onerror = (e) => {
+      URL.revokeObjectURL(url);
+      reject(e);
+    };
+    img.src = url;
+  });
 }
 
 export async function QRCodeGenerate(
@@ -469,12 +569,15 @@ export async function QRCodeGenerate(
     maxX: Math.max(0, matrixSize - iw),
     maxY: Math.max(0, matrixSize - ih),
   });
-  const makeBounds = (svg: string): QRGenerateResult => ({
-    svg,
+  const base: QRGenerateResultBase = {
     matrixSize,
     eyeZones: _eyeZones,
     getMaxPos: _getMaxPos,
-  });
+  };
+  const finalizeResult = async (svg: string): Promise<QRGenerateResult> => {
+    const canvas = await svgToCanvas(svg, w, h);
+    return { ...base, svg, canvas };
+  };
 
   const fullSize = matrixSize + effectiveMargin * 2;
   const w = config.width ?? 1000;
@@ -576,7 +679,7 @@ export async function QRCodeGenerate(
       if (isBlocked) continue;
 
       const zone = getModuleZone(x, y, matrixSize);
-      let partConfig: QrPart;
+      let partConfig: QrPartOptions;
       let symbolId = "";
 
       if (zone === "dots") {
@@ -693,7 +796,7 @@ export async function QRCodeGenerate(
   const generateEyeLayer = (
     key: "cornerSquare" | "cornerDot",
     gradPrefix: string,
-    partConfig: QrPart,
+    partConfig: QrPartOptions,
   ) => {
     const hasUses = !!uses[key];
     const hasPaths = !!pathsD[key];
@@ -807,7 +910,7 @@ export async function QRCodeGenerate(
     const scaleX = inset.width / fullSize;
     const scaleY = inset.height / fullSize;
 
-    return makeBounds(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${frame.width} ${frame.height}" width="${svgW}" height="${svgH}">
+    return finalizeResult(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${frame.width} ${frame.height}" width="${svgW}" height="${svgH}">
       <!-- Frame image (behind everything) -->
       <image href="${frame.source}" x="0" y="0" width="${frame.width}" height="${frame.height}" preserveAspectRatio="xMidYMid slice" />
       <!-- QR code scaled into the inset area -->
@@ -818,7 +921,7 @@ export async function QRCodeGenerate(
   }
 
   // --- No frame: standard output ---
-  return makeBounds(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${fullSize} ${fullSize}" width="${w}" height="${h}">
+  return finalizeResult(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${fullSize} ${fullSize}" width="${w}" height="${h}">
     ${qrContent}
   </svg>`);
 }
