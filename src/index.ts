@@ -3,35 +3,31 @@ import { QRShapes, shapes } from "./renderer/icons";
 import { neighborShapes, Neighbors } from "./renderer/dots";
 import { cornerDots } from "./renderer/cornerDot";
 import { cornerSquares } from "./renderer/cornerSquare";
-import {
-  Options,
-  QrPart,
-  QrShape,
-  ShapeType,
-  FigureShape,
-  QrImage,
-  QrImagePosition,
-  Gradient,
-  QRShapesType,
-} from "./types";
+import { Options, QrPart, QrImage, QrImagePosition, Gradient } from "./types";
 import { detectFrameInset } from "./frame-inset";
 import { exportQR, FileExtension, ExportOptions } from "./export";
 import { defaultOptions } from "./default";
 
 export { exportQR, QRShapes };
-export type {
-  FileExtension,
-  ExportOptions,
-  Options,
-  QrPart,
-  QrShape,
-  ShapeType,
-  FigureShape,
-  QrImage,
-  QrImagePosition,
-  Gradient,
-  QRShapesType,
-};
+// export type {
+//   FileExtension,
+//   ExportOptions,
+//   Options,
+//   QrPart,
+//   QrShape,
+//   ShapeType,
+//   FigureShape,
+//   QrImage,
+//   QrImagePosition,
+//   Gradient,
+//   QRShapesType,
+//   DotFigure,
+//   CornerSquareFigure,
+//   CornerDotFigure,
+//   QrFrame,
+// };
+
+export * from "./types";
 
 // --- Helpers ---
 
