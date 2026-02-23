@@ -44,6 +44,7 @@ export type QrImage = {
   x?: number; // Position in modules. If omitted, calculated automatically (center)
   y?: number;
   excludeDots?: boolean; // If true, we won't draw QR dots under this image
+  margin?: number; // Outer margin in modules — expands the dot-clearing zone around the image
   opacity?: number; // 0.0 – 1.0 (default 1)
   preserveAspectRatio?: string; // SVG preserveAspectRatio attr (default "xMidYMid meet")
 };
@@ -57,6 +58,31 @@ export type FigureShape =
   | "extra-rounded"
   | "rounded"
   | "classy"
+  | "classy-rounded";
+
+export type DotFigure =
+  | "square"
+  | "dots"
+  | "extra-rounded"
+  | "rounded"
+  | "classy"
+  | "classy-rounded";
+
+export type CornerSquareFigure =
+  | "square"
+  | "dot"
+  | "dots"
+  | "extra-rounded"
+  | "rounded"
+  | "classy"
+  | "classy-rounded";
+
+export type CornerDotFigure =
+  | "square"
+  | "dot"
+  | "dots"
+  | "classy"
+  | "rounded"
   | "classy-rounded";
 
 export type QrShape = {
@@ -97,7 +123,7 @@ export interface Options {
   width?: number; // Output width in pixels (e.g. 1000)
   height?: number; // Output height in pixels
   margin?: number; // Padding in modules (default 4)
-  borderRadius?: number; // Corner radius in pixels for the entire QR code
+  borderRadius?: number; // Corner radius as a percentage (0–100). 100 = fully rounded (circle). Scale-independent.
 
   backgroundOptions?: {
     color?: string;

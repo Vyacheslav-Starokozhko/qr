@@ -350,6 +350,29 @@ export async function QRCodeGenerate(
   const matrixSize = matrix.length;
   const margin = config.margin ?? 4;
 
+  // --- Effective margin: ensure corner modules stay inside the rounded clip ---
+  // When borderRadius > 0, analytically compute the minimum margin so that the
+  // corner module at (effectiveMargin, effectiveMargin) lies exactly on the clip
+  // arc boundary. This avoids any scale transform and fully respects the user's
+  // margin when it's already large enough.
+  //
+  //   Let p  = borderRadius / 100 (0–1)
+  //       c  = 1 − 1/√2              (≈ 0.2929, the safe-inset ratio)
+  //       k  = p × c
+  //   minSafeMargin = k × matrixSize / (2 × (1 − k))
+  //
+  // Derivation: fullSize = matrixSize + 2m, rx = p × fullSize/2,
+  // safeInset = rx × c = m  →  solved for m.
+  const clampedBorderRadius =
+    config.borderRadius != null
+      ? Math.max(0, Math.min(100, config.borderRadius))
+      : 0;
+  const _c = 1 - 1 / Math.SQRT2; // ≈ 0.2929
+  const _k = (clampedBorderRadius / 100) * _c;
+  const minSafeMargin =
+    _k > 0 && _k < 1 ? (_k * matrixSize) / (2 * (1 - _k)) : 0;
+  const effectiveMargin = Math.max(margin, minSafeMargin);
+
   // Pre-build bounds (returned alongside svg)
   const _eyeZones: QREyeZone[] = getEyeZones(matrixSize).map((e) => ({
     ...e,
@@ -367,11 +390,11 @@ export async function QRCodeGenerate(
     getMaxPos: _getMaxPos,
   });
 
-  const fullSize = matrixSize + margin * 2;
+  const fullSize = matrixSize + effectiveMargin * 2;
   const w = config.width ?? 1000;
   const h = config.height ?? 1000;
 
-  const eyes = getEyePositions(matrixSize, margin);
+  const eyes = getEyePositions(matrixSize, effectiveMargin);
   const eyeFrameSize = 7; // Outer frame
   const eyeDotSize = 3; // Inner center (ball)
 
@@ -456,13 +479,14 @@ export async function QRCodeGenerate(
 
       const isBlocked = images.some((img) => {
         if (!img.excludeDots) return false;
+        const imgMargin = img.margin ?? 0;
         const imgX = img.x!;
         const imgY = img.y!;
         return (
-          x >= imgX - 0.5 &&
-          x <= imgX + img.width - 0.5 &&
-          y >= imgY - 0.5 &&
-          y <= imgY + img.height - 0.5
+          x >= imgX - 0.5 - imgMargin &&
+          x <= imgX + img.width - 0.5 + imgMargin &&
+          y >= imgY - 0.5 - imgMargin &&
+          y <= imgY + img.height - 0.5 + imgMargin
         );
       });
       if (isBlocked) continue;
@@ -492,7 +516,12 @@ export async function QRCodeGenerate(
         if (zone === "dots") {
           const neighbors = getNeighbors(x, y, matrix, matrixSize);
           const drawer = neighborShapes[shapePath] ?? neighborShapes["square"];
-          pathsD.dots += drawer(x + margin, y + margin, neighbors, scale);
+          pathsD.dots += drawer(
+            x + effectiveMargin,
+            y + effectiveMargin,
+            neighbors,
+            scale,
+          );
         } else if (zone === "cornerSquare") {
           const origin = getEyeOrigin(x, y, matrixSize);
           if (!origin) continue;
@@ -501,8 +530,8 @@ export async function QRCodeGenerate(
             drawnEyes.add(eyeKey);
             const drawer = cornerSquares[shapePath] ?? cornerSquares["square"];
             pathsD.cornerSquare += drawer(
-              origin.ex + margin,
-              origin.ey + margin,
+              origin.ex + effectiveMargin,
+              origin.ey + effectiveMargin,
               7,
             );
           }
@@ -515,8 +544,8 @@ export async function QRCodeGenerate(
             drawnEyes.add(eyeKey);
             const drawer = cornerDots[shapePath] ?? cornerDots["square"];
             pathsD.cornerDot += drawer(
-              origin.ex + 2 + margin,
-              origin.ey + 2 + margin,
+              origin.ex + 2 + effectiveMargin,
+              origin.ey + 2 + effectiveMargin,
               3,
             );
           }
@@ -538,8 +567,8 @@ export async function QRCodeGenerate(
         }
       }
 
-      const baseX = x + margin;
-      const baseY = y + margin;
+      const baseX = x + effectiveMargin;
+      const baseY = y + effectiveMargin;
 
       const sw = drawSize * scale;
       const sh = drawSize * scale;
@@ -569,10 +598,10 @@ export async function QRCodeGenerate(
 
     return `
         <mask id="mask-dots">
-            <rect width="100%" height="100%" fill="black" />
+            <rect width="${fullSize}" height="${fullSize}" fill="black" />
             <g fill="white">${maskContent}</g>
         </mask>
-        <rect width="100%" height="100%" fill="${fill}" mask="url(#mask-dots)" />
+        <rect width="${fullSize}" height="${fullSize}" fill="${fill}" mask="url(#mask-dots)" />
       `;
   };
 
@@ -593,7 +622,7 @@ export async function QRCodeGenerate(
 
     const maskDef = `
         <mask id="${maskId}">
-            <rect width="100%" height="100%" fill="black" />
+            <rect width="${fullSize}" height="${fullSize}" fill="black" />
             <g fill="white" shape-rendering="crispEdges">${maskContent}</g>
         </mask>
       `;
@@ -618,17 +647,18 @@ export async function QRCodeGenerate(
   // Images SVG (x/y are always resolved by resolveImagePositions)
   let imagesSvg = "";
   images.forEach((img) => {
-    const imgX = img.x! + margin;
-    const imgY = img.y! + margin;
+    const imgX = img.x! + effectiveMargin;
+    const imgY = img.y! + effectiveMargin;
     const par = img.preserveAspectRatio ?? "xMidYMid meet";
     const opacityAttr = img.opacity != null ? ` opacity="${img.opacity}"` : "";
     imagesSvg += `<image href="${img.source}" x="${imgX}" y="${imgY}" width="${img.width}" height="${img.height}" preserveAspectRatio="${par}"${opacityAttr} />`;
   });
 
-  // Convert borderRadius from output pixels to SVG viewBox units (QR space)
-  const borderRadius = config.borderRadius
-    ? (config.borderRadius / w) * fullSize
-    : 0;
+  // Convert borderRadius from percentage (0–100) to SVG viewBox units.
+  // 100% → rx = fullSize/2, which produces a perfect circle on a square QR.
+  // effectiveMargin already guarantees corner modules are inside the arc, so
+  // no additional scale transform is needed here.
+  const borderRadius = (clampedBorderRadius / 100) * (fullSize / 2);
   const rxAttr = borderRadius > 0 ? `rx="${borderRadius.toFixed(3)}"` : "";
   const clipPathDef =
     borderRadius > 0
@@ -640,8 +670,8 @@ export async function QRCodeGenerate(
   const qrContent = `
     <defs>${defsString}${clipPathDef}</defs>
     <g ${clipAttr}>
-      <rect width="100%" height="100%" fill="${getBackgroundFill()}" ${rxAttr}/>
-      ${config.backgroundOptions?.image ? `<image href="${config.backgroundOptions.image}" width="100%" height="100%" preserveAspectRatio="none" />` : ""}
+      <rect width="${fullSize}" height="${fullSize}" fill="${getBackgroundFill()}" ${rxAttr}/>
+      ${config.backgroundOptions?.image ? `<image href="${config.backgroundOptions.image}" width="${fullSize}" height="${fullSize}" preserveAspectRatio="none" />` : ""}
       ${generateDotsLayer()}
       ${generateEyeLayer("cornerSquare", "grad-sq", config.cornersSquareOptions)}
       ${generateEyeLayer("cornerDot", "grad-dot", config.cornersDotOptions)}
