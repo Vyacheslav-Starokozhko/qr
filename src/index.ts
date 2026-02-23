@@ -10,6 +10,7 @@ import {
   ShapeType,
   FigureShape,
   QrImage,
+  QrImagePosition,
   Gradient,
   QRShapesType,
 } from "./types";
@@ -27,6 +28,7 @@ export type {
   ShapeType,
   FigureShape,
   QrImage,
+  QrImagePosition,
   Gradient,
   QRShapesType,
 };
@@ -136,19 +138,31 @@ function createSymbol(id: string, part: QrPart): string {
   return "";
 }
 
-// --- Auto-layout for images without explicit x/y ---
+// --- Auto-layout for images ---
 
-/** Returns the 3 eye zones (7×7 blocks) in matrix coordinates (no padding). */
+/** Internal image type with resolved flat x/y coordinates (in matrix modules). */
+type ResolvedQrImage = Omit<QrImage, "position"> & { x: number; y: number };
+
+// ─── Critical-zone constants ─────────────────────────────────────────────────
+// Each finder pattern is 7×7 modules.  The 1-module-wide separator that
+// surrounds it on the inner sides is also forbidden (QR spec requires it to be
+// white and unobstructed). Together they form an 8×8 critical zone at every
+// corner that images must never cover.
+const EYE_SIZE = 7; // finder-pattern width/height in modules
+const CRITICAL = 8; // finder + separator = hard exclusion boundary
+
+/** Top-left origins of the 3 finder patterns (in matrix coordinates). */
 function getEyeZones(matrixSize: number) {
   return [
     { id: "top-left", x: 0, y: 0 },
-    { id: "top-right", x: matrixSize - 7, y: 0 },
-    { id: "bottom-left", x: 0, y: matrixSize - 7 },
+    { id: "top-right", x: matrixSize - EYE_SIZE, y: 0 },
+    { id: "bottom-left", x: 0, y: matrixSize - EYE_SIZE },
   ];
 }
 
 /**
- * Returns true if a rectangle [rx, ry, rw, rh] overlaps any of the 3 eye zones.
+ * Returns true if a rectangle overlaps any critical zone
+ * (finder pattern + its 1-module separator = CRITICAL × CRITICAL area).
  */
 function overlapsEye(
   rx: number,
@@ -158,34 +172,38 @@ function overlapsEye(
   matrixSize: number,
 ): boolean {
   for (const e of getEyeZones(matrixSize)) {
-    if (rx < e.x + 7 && rx + rw > e.x && ry < e.y + 7 && ry + rh > e.y)
+    if (
+      rx < e.x + CRITICAL &&
+      rx + rw > e.x &&
+      ry < e.y + CRITICAL &&
+      ry + rh > e.y
+    )
       return true;
   }
   return false;
 }
 
 /**
- * If a manually-positioned image overlaps an eye zone, push it to the nearest
- * safe side and log a console.warn with the original vs adjusted coordinates.
+ * Pushes a custom-positioned image out of every critical zone it overlaps.
+ * A console.warn is emitted for each adjustment so the caller is aware.
  */
 function clampImageFromEyes(
-  img: import("./types").QrImage,
+  img: ResolvedQrImage,
   imgIndex: number,
   matrixSize: number,
-): import("./types").QrImage {
-  let x = img.x!;
-  let y = img.y!;
+): ResolvedQrImage {
+  let { x, y } = img;
 
   for (const e of getEyeZones(matrixSize)) {
-    const overlapX = x < e.x + 7 && x + img.width > e.x;
-    const overlapY = y < e.y + 7 && y + img.height > e.y;
+    const overlapX = x < e.x + CRITICAL && x + img.width > e.x;
+    const overlapY = y < e.y + CRITICAL && y + img.height > e.y;
     if (!overlapX || !overlapY) continue;
 
     // Find the axis with the smallest penetration depth and push out
     const opts = [
-      { axis: "x" as const, dir: 1, depth: e.x + 7 - x },
+      { axis: "x" as const, dir: 1, depth: e.x + CRITICAL - x },
       { axis: "x" as const, dir: -1, depth: x + img.width - e.x },
-      { axis: "y" as const, dir: 1, depth: e.y + 7 - y },
+      { axis: "y" as const, dir: 1, depth: e.y + CRITICAL - y },
       { axis: "y" as const, dir: -1, depth: y + img.height - e.y },
     ]
       .filter((o) => o.depth > 0)
@@ -196,11 +214,12 @@ function clampImageFromEyes(
     const origX = x;
     const origY = y;
 
-    if (fix.axis === "x") x = fix.dir > 0 ? e.x + 7 : e.x - img.width;
-    else y = fix.dir > 0 ? e.y + 7 : e.y - img.height;
+    if (fix.axis === "x") x = fix.dir > 0 ? e.x + CRITICAL : e.x - img.width;
+    else y = fix.dir > 0 ? e.y + CRITICAL : e.y - img.height;
 
     console.warn(
-      `[QR] images[${imgIndex}] overlaps the "${e.id}" eye zone. ` +
+      `[QR] images[${imgIndex}] overlaps the critical "${e.id}" zone ` +
+        `(finder pattern + separator). ` +
         `Auto-adjusted: (${origX.toFixed(1)}, ${origY.toFixed(1)}) → (${x.toFixed(1)}, ${y.toFixed(1)}).`,
     );
   }
@@ -209,85 +228,156 @@ function clampImageFromEyes(
 }
 
 /**
- * Resolves x/y for images that don't have explicit coordinates.
- * Manually-placed images are validated and clamped away from eye zones.
- * Auto-positioned images are distributed in the data zone avoiding eye areas.
+ * Resolves every QrImage's position into a flat { x, y } coordinate pair.
+ *
+ * Safe zone layout (mirrors the diagram):
+ *
+ *   ┌──[CRIT]──┬──[extra-top]──┬──[CRIT]──┐
+ *   │  TL eye  │  Safe Zone 2  │  TR eye  │
+ *   ├──────────┼───────────────┤          │
+ *   │[extra-   │               │[extra-   │
+ *   │  left]   │  Safe Zone 1  │  right]  │
+ *   │ Zone 2   │    (center)   │  Zone 4  │
+ *   │          │               │          │
+ *   ├──[CRIT]──┴──[extra-bot]──┴──────────┤
+ *   │  BL eye  │  Safe Zone 2  │          │
+ *   └──────────┴───────────────┴──────────┘
+ *
+ * Critical zone = finder pattern (7×7) + 1-module separator = CRITICAL (8)
+ * from each occupied corner. Images are never placed inside these areas.
+ *
+ * Named positions:
+ *  "center"        → Safe Zone 1: centred in the full matrix
+ *  "top"           → upper quarter of the inner data zone (between top eyes and centre)
+ *  "bottom"        → lower quarter of the inner data zone
+ *  "left"          → left quarter of the inner data zone
+ *  "right"         → right quarter of the inner data zone
+ *  "extra-top"     → Safe Zone 2: top border strip, centred between TL and TR eyes;
+ *                    image centred within the EYE_SIZE-module eye band vertically
+ *  "extra-bottom"  → Safe Zone 2: bottom border strip, aligned with BL eye row;
+ *                    image centred within the EYE_SIZE-module eye band vertically
+ *  "extra-left"    → Safe Zone 2: left border strip, centred between TL and BL eyes;
+ *                    image centred within the EYE_SIZE-module eye band horizontally
+ *  "extra-right"   → Safe Zone 4: right border strip, aligned with TR eye column;
+ *                    image centred within the EYE_SIZE-module eye band horizontally
+ *  "custom"        → explicit x/y (auto-clamped out of critical zones with a warning)
  */
 function resolveImagePositions(
-  images: import("./types").QrImage[],
+  images: QrImage[],
   matrixSize: number,
-): import("./types").QrImage[] {
-  const manualRaw = images.filter((img) => img.x != null && img.y != null);
-  const auto = images.filter((img) => img.x == null || img.y == null);
-
-  // Protect manually-placed images from overlapping eye zones
-  const manual = manualRaw.map((img) => {
-    const globalIdx = images.indexOf(img);
-    return overlapsEye(img.x!, img.y!, img.width, img.height, matrixSize)
-      ? clampImageFromEyes(img, globalIdx, matrixSize)
-      : img;
-  });
-
-  if (auto.length === 0) return [...manual];
-
-  // Data zone bounds (inside the eye-free area)
-  const dataStart = 8; // leave 1 module gap after eye zone (7+1)
-  const dataEnd = matrixSize - 8;
-  const dataSize = dataEnd - dataStart; // usable width/height
-
-  // Center of the full matrix
+): ResolvedQrImage[] {
+  // Inner data zone — starts after finder + separator on each side
+  const dataStart = CRITICAL; // = 8
+  const dataEnd = matrixSize - CRITICAL;
+  const dataSize = dataEnd - dataStart;
   const cx = matrixSize / 2;
   const cy = matrixSize / 2;
 
-  // Candidate positions (in matrix coords, no padding)
-  // We'll pick the best N positions for N auto images
-  const candidates: { x: number; y: number }[] = [
-    // 1. Center
-    { x: cx, y: cy },
-    // 2. Left-center, Right-center
-    { x: dataStart + dataSize * 0.25, y: cy },
-    { x: dataStart + dataSize * 0.75, y: cy },
-    // 3. Top-center
-    { x: cx, y: dataStart + dataSize * 0.25 },
-    // 4. Bottom-center
-    { x: cx, y: dataStart + dataSize * 0.75 },
-    // 5. Bottom-right corner of data zone
-    { x: dataStart + dataSize * 0.75, y: dataStart + dataSize * 0.75 },
-    // 6. Top-right of data zone (safe — no eye there)
-    { x: dataStart + dataSize * 0.75, y: dataStart + dataSize * 0.25 },
-    // 7. Bottom-left of data zone
-    { x: dataStart + dataSize * 0.25, y: dataStart + dataSize * 0.75 },
-    // 8. Top-left of data zone (safe — no eye there for inner data)
-    { x: dataStart + dataSize * 0.25, y: dataStart + dataSize * 0.25 },
-  ];
+  /** Compute the top-left x/y for a named position type. */
+  function namedCenter(
+    type: NonNullable<Exclude<QrImagePosition, { type: "custom" }>["type"]>,
+    w: number,
+    h: number,
+  ): { x: number; y: number } {
+    switch (type) {
+      // ── inner data-zone positions (Safe Zones 1, 3, 4) ──────────────────
+      case "top":
+        return { x: cx - w / 2, y: dataStart + dataSize * 0.25 - h / 2 };
+      case "bottom":
+        return { x: cx - w / 2, y: dataStart + dataSize * 0.75 - h / 2 };
+      case "left":
+        return { x: dataStart + dataSize * 0.25 - w / 2, y: cy - h / 2 };
+      case "right":
+        return { x: dataStart + dataSize * 0.75 - w / 2, y: cy - h / 2 };
 
-  const resolved: import("./types").QrImage[] = [];
-  let candidateIdx = 0;
+      // ── border-strip positions (Safe Zone 2 / 4) ─────────────────────────
+      //
+      // Rules for "extra-*":
+      //  • Parallel axis  (along the border): centred in the SAFE GAP between
+      //    the two relevant critical zones: gap = [CRITICAL, matrixSize-CRITICAL].
+      //    Centre = matrixSize/2.
+      //  • Perpendicular axis (into the QR): centred within EYE_SIZE modules,
+      //    clamped ≥ 0 so the image never sticks out of the QR boundary.
+      //
+      // extra-top  — top border, Safe Zone 2
+      //   gap: x ∈ [CRITICAL, matrixSize-CRITICAL]  (between TL and TR)
+      //   band: y ∈ [0, EYE_SIZE-1]
+      case "extra-top":
+        return {
+          x: cx - w / 2,
+          y: Math.max(0, (EYE_SIZE - h) / 2),
+        };
 
-  for (const img of auto) {
-    // Find the next candidate that doesn't overlap an eye zone
-    let placed = false;
-    while (candidateIdx < candidates.length) {
-      const c = candidates[candidateIdx++];
-      const imgX = c.x - img.width / 2;
-      const imgY = c.y - img.height / 2;
-      if (!overlapsEye(imgX, imgY, img.width, img.height, matrixSize)) {
-        resolved.push({ ...img, x: imgX, y: imgY });
-        placed = true;
-        break;
-      }
-    }
-    // Fallback: center if no candidate worked
-    if (!placed) {
-      resolved.push({
-        ...img,
-        x: (matrixSize - img.width) / 2,
-        y: (matrixSize - img.height) / 2,
-      });
+      // extra-bottom — bottom border, Safe Zone 2
+      //   gap: x ∈ [CRITICAL, matrixSize]  (BL eye on left, nothing on right)
+      //         → use matrixSize/2 for visual symmetry; clamping handles BL
+      //   band: y ∈ [matrixSize-EYE_SIZE, matrixSize-1]
+      case "extra-bottom":
+        return {
+          x: cx - w / 2,
+          y: matrixSize - EYE_SIZE + Math.max(0, (EYE_SIZE - h) / 2),
+        };
+
+      // extra-left — left border, Safe Zone 2
+      //   gap: y ∈ [CRITICAL, matrixSize-CRITICAL]  (between TL and BL)
+      //   band: x ∈ [0, EYE_SIZE-1]
+      case "extra-left":
+        return {
+          x: Math.max(0, (EYE_SIZE - w) / 2),
+          y: cy - h / 2,
+        };
+
+      // extra-right — right border, Safe Zone 4
+      //   gap: y ∈ [CRITICAL, matrixSize]  (TR eye on top, nothing below)
+      //         → use matrixSize/2 for visual symmetry; clamping handles TR
+      //   band: x ∈ [matrixSize-EYE_SIZE, matrixSize-1]
+      case "extra-right":
+        return {
+          x: matrixSize - EYE_SIZE + Math.max(0, (EYE_SIZE - w) / 2),
+          y: cy - h / 2,
+        };
+
+      case "center":
+      default:
+        return { x: cx - w / 2, y: cy - h / 2 };
     }
   }
 
-  return [...manual, ...resolved];
+  return images.map((img, globalIdx) => {
+    const pos = img.position;
+    const {
+      source,
+      width,
+      height,
+      excludeDots,
+      margin,
+      opacity,
+      preserveAspectRatio,
+    } = img;
+    const base = {
+      source,
+      width,
+      height,
+      excludeDots,
+      margin,
+      opacity,
+      preserveAspectRatio,
+    };
+
+    if (pos?.type === "custom") {
+      const resolved: ResolvedQrImage = { ...base, x: pos.x, y: pos.y };
+      return overlapsEye(pos.x, pos.y, width, height, matrixSize)
+        ? clampImageFromEyes(resolved, globalIdx, matrixSize)
+        : resolved;
+    }
+
+    // Named auto-position (covers all non-custom variants)
+    const type = (pos?.type ?? "center") as NonNullable<
+      Exclude<QrImagePosition, { type: "custom" }>["type"]
+    >;
+    const { x, y } = namedCenter(type, width, height);
+    return { ...base, x, y };
+  });
 }
 
 // --- Figure helpers ---
@@ -480,13 +570,11 @@ export async function QRCodeGenerate(
       const isBlocked = images.some((img) => {
         if (!img.excludeDots) return false;
         const imgMargin = img.margin ?? 0;
-        const imgX = img.x!;
-        const imgY = img.y!;
         return (
-          x >= imgX - 0.5 - imgMargin &&
-          x <= imgX + img.width - 0.5 + imgMargin &&
-          y >= imgY - 0.5 - imgMargin &&
-          y <= imgY + img.height - 0.5 + imgMargin
+          x >= img.x - 0.5 - imgMargin &&
+          x <= img.x + img.width - 0.5 + imgMargin &&
+          y >= img.y - 0.5 - imgMargin &&
+          y <= img.y + img.height - 0.5 + imgMargin
         );
       });
       if (isBlocked) continue;
@@ -647,8 +735,8 @@ export async function QRCodeGenerate(
   // Images SVG (x/y are always resolved by resolveImagePositions)
   let imagesSvg = "";
   images.forEach((img) => {
-    const imgX = img.x! + effectiveMargin;
-    const imgY = img.y! + effectiveMargin;
+    const imgX = img.x + effectiveMargin;
+    const imgY = img.y + effectiveMargin;
     const par = img.preserveAspectRatio ?? "xMidYMid meet";
     const opacityAttr = img.opacity != null ? ` opacity="${img.opacity}"` : "";
     imagesSvg += `<image href="${img.source}" x="${imgX}" y="${imgY}" width="${img.width}" height="${img.height}" preserveAspectRatio="${par}"${opacityAttr} />`;

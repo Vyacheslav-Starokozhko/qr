@@ -51,7 +51,7 @@ const fullWLogo = path1 + " " + path2; // Just concatenating
       // Dark background so white dots are visible
       color: "#fff",
       // Uncomment to use a full-bleed background image instead:
-      image: bg1Img,
+      // image: bg1Img,
       // gradient: {
       //   type: "linear",
       //   rotation: 90,
@@ -74,14 +74,52 @@ const fullWLogo = path1 + " " + path2; // Just concatenating
         width: 5,
         height: 5,
         excludeDots: true,
+        position: { type: "center" },
       },
       // Second image — also inline SVG (a small star badge)
+      // {
+      //   source:
+      //     "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='12' fill='%23edf505'/%3E%3Cpolygon points='12,4 14.5,9.5 21,10.3 16.5,14.6 17.8,21 12,17.8 6.2,21 7.5,14.6 3,10.3 9.5,9.5' fill='%231a1a2e'/%3E%3C/svg%3E",
+      //   width: 3,
+      //   height: 3,
+      //   excludeDots: true,
+      //   position: { type: "extra-top" },
+      // },
+      // {
+      //   source:
+      //     "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='12' fill='%23edf505'/%3E%3Cpolygon points='12,4 14.5,9.5 21,10.3 16.5,14.6 17.8,21 12,17.8 6.2,21 7.5,14.6 3,10.3 9.5,9.5' fill='%231a1a2e'/%3E%3C/svg%3E",
+      //   width: 3,
+      //   height: 3,
+      //   excludeDots: true,
+      //   margin: 0,
+      //   position: { type: "extra-bottom" },
+      // },
+      // {
+      //   source:
+      //     "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='12' fill='%23edf505'/%3E%3Cpolygon points='12,4 14.5,9.5 21,10.3 16.5,14.6 17.8,21 12,17.8 6.2,21 7.5,14.6 3,10.3 9.5,9.5' fill='%231a1a2e'/%3E%3C/svg%3E",
+      //   width: 3,
+      //   height: 3,
+      //   excludeDots: true,
+      //   margin: 0,
+      //   position: { type: "extra-left" },
+      // },
+      // {
+      //   source:
+      //     "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='12' fill='%23edf505'/%3E%3Cpolygon points='12,4 14.5,9.5 21,10.3 16.5,14.6 17.8,21 12,17.8 6.2,21 7.5,14.6 3,10.3 9.5,9.5' fill='%231a1a2e'/%3E%3C/svg%3E",
+      //   width: 3,
+      //   height: 3,
+      //   excludeDots: true,
+      //   margin: 0,
+      //   position: { type: "extra-right" },
+      // },
+
       {
         source:
           "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='12' fill='%23edf505'/%3E%3Cpolygon points='12,4 14.5,9.5 21,10.3 16.5,14.6 17.8,21 12,17.8 6.2,21 7.5,14.6 3,10.3 9.5,9.5' fill='%231a1a2e'/%3E%3C/svg%3E",
         width: 3,
         height: 3,
         excludeDots: true,
+        position: { type: "top" },
       },
       {
         source:
@@ -89,20 +127,46 @@ const fullWLogo = path1 + " " + path2; // Just concatenating
         width: 3,
         height: 3,
         excludeDots: true,
-        margin: 1,
-        x: 12,
-        y: 4,
+        margin: 0,
+        position: { type: "bottom" },
+      },
+      {
+        source:
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='12' fill='%23edf505'/%3E%3Cpolygon points='12,4 14.5,9.5 21,10.3 16.5,14.6 17.8,21 12,17.8 6.2,21 7.5,14.6 3,10.3 9.5,9.5' fill='%231a1a2e'/%3E%3C/svg%3E",
+        width: 3,
+        height: 3,
+        excludeDots: true,
+        margin: 0,
+        position: { type: "left" },
+      },
+      {
+        source:
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='12' fill='%23edf505'/%3E%3Cpolygon points='12,4 14.5,9.5 21,10.3 16.5,14.6 17.8,21 12,17.8 6.2,21 7.5,14.6 3,10.3 9.5,9.5' fill='%231a1a2e'/%3E%3C/svg%3E",
+        width: 3,
+        height: 3,
+        excludeDots: true,
+        margin: 0,
+        position: { type: "right" },
+      },
+      {
+        source:
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='12' fill='%23edf505'/%3E%3Cpolygon points='12,4 14.5,9.5 21,10.3 16.5,14.6 17.8,21 12,17.8 6.2,21 7.5,14.6 3,10.3 9.5,9.5' fill='%231a1a2e'/%3E%3C/svg%3E",
+        width: 3,
+        height: 3,
+        excludeDots: false,
+        position: { type: "custom", x: 24, y: 24 },
+        margin: 0,
       },
     ],
 
     // 1. DOTS
     dotsOptions: {
       shape: {
-        type: "icon",
-        path: "dots-classy-rounded",
+        type: "figure",
+        path: "square",
       },
-      color: "#e0e0e0",
-      scale: 1.25,
+      color: "#000000",
+      // scale: 1.6,
     },
 
     // 2. CORNER SQUARE (outer eye frame)

@@ -36,13 +36,31 @@ export type Gradient = {
     color: string;
   }[];
 };
+
+// Named auto-positions place the image in a predefined zone of the QR matrix.
+// "extra-*" positions the image at the QR border in the strip between the
+// finder-pattern (eye) zones. "custom" requires explicit x/y coordinates.
+export type QrImagePosition =
+  | {
+      type?:
+        | "center"
+        | "top"
+        | "right"
+        | "bottom"
+        | "left"
+        | "extra-top"
+        | "extra-bottom"
+        | "extra-left"
+        | "extra-right";
+    }
+  | { type: "custom"; x: number; y: number };
+
 // Logo/Image configuration
 export type QrImage = {
   source: string; // url or base64
   width: number; // size in modules (e.g., 0.5 or 1 or 5)
   height: number;
-  x?: number; // Position in modules. If omitted, calculated automatically (center)
-  y?: number;
+  position?: QrImagePosition; // defaults to { type: "center" }
   excludeDots?: boolean; // If true, we won't draw QR dots under this image
   margin?: number; // Outer margin in modules — expands the dot-clearing zone around the image
   opacity?: number; // 0.0 – 1.0 (default 1)
