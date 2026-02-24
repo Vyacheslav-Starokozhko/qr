@@ -344,9 +344,61 @@ const fullWLogo = path1 + " " + path2; // Just concatenating
     data: "https://qr-code-builder.vercel.app",
   });
 
+  const { svg: heart3 } = await QRCodeGenerate({
+    width: 362,
+    height: 362,
+    images: [],
+    margin: 1,
+    dotsOptions: {
+      color: "#000000",
+      gradient: {
+        type: "linear",
+        rotation: 0,
+        colorStops: [
+          {
+            offset: "0",
+            color: "#000000",
+          },
+          {
+            offset: "1",
+            color: "#000000",
+          },
+        ],
+      },
+      shape: {
+        type: "figure",
+        path: "classy-rounded",
+      },
+      scale: 1,
+    },
+    backgroundOptions: {
+      color: "rgba(255, 255, 255, 0)",
+    },
+    cornersSquareOptions: {
+      color: "#000000",
+      shape: {
+        type: "figure",
+        path: "dots",
+      },
+      isSingle: false,
+      scale: 1,
+    },
+    cornersDotOptions: {
+      color: "#000000",
+      shape: {
+        type: "figure",
+        path: "dots",
+      },
+      isSingle: false,
+      scale: 1,
+    },
+    data: "https://qr-code-builder.vercel.app",
+  });
+
   fs.writeFileSync("star2.svg", star2);
   fs.writeFileSync("star.svg", star);
   fs.writeFileSync("heart2.svg", heart2);
   fs.writeFileSync("heart.svg", heart);
   fs.writeFileSync("svgWithFrame.svg", svgWithFrame);
+  fs.writeFileSync("heart3.svg", heart3);
 })();

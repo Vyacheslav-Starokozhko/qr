@@ -27,6 +27,7 @@ export const neighborShapes: Record<string, NeighborShapeDrawer> = {
   },
 
   // 2. DOTS (Isolated circles, ignores neighbors)
+  dot: (x, y, n, s = 1) => neighborShapes.dots(x, y, n, s), // Alias
   dots: (x, y, n, s = 1) => {
     const r = 0.5 * s;
     const cx = x + 0.5;
