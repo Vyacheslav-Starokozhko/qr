@@ -220,38 +220,49 @@ const fullWLogo = path1 + " " + path2; // Just concatenating
   } = await QRCodeGenerate({
     width: 362,
     height: 362,
+    images: [],
     margin: 1,
     dotsOptions: {
+      color: "#000000",
+      gradient: {
+        type: "linear",
+        rotation: 0,
+        colorStops: [
+          {
+            offset: "0",
+            color: "#000000",
+          },
+          {
+            offset: "1",
+            color: "#000000",
+          },
+        ],
+      },
       shape: {
         type: "figure",
-        path: "square",
+        path: "rounded",
       },
-      color: "rgba(0,0,0,1)",
-      scale: 1,
-      isSingle: false,
     },
     backgroundOptions: {
-      color: "rgba(212,190,255,1)",
+      color: "rgba(255, 255, 255, 0)",
     },
     cornersSquareOptions: {
       color: "#000000",
       shape: {
-        type: "icon",
-        path: "outer-eye-dot",
+        type: "figure",
+        path: "classy",
       },
       isSingle: false,
     },
     cornersDotOptions: {
       color: "#000000",
       shape: {
-        type: "icon",
-        path: "inner-eye-rounded",
+        type: "figure",
+        path: "classy",
       },
       isSingle: false,
-      scale: 1,
     },
     data: "https://qr-code-builder.vercel.app",
-    borderRadius: 0,
   });
 
   fs.writeFileSync("output-frame.svg", svgWithFrame);

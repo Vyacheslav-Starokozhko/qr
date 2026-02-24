@@ -709,31 +709,58 @@ export async function QRCodeGenerate(
             scale,
           );
         } else if (zone === "cornerSquare") {
-          const origin = getEyeOrigin(x, y, matrixSize);
-          if (!origin) continue;
-          const eyeKey = `sq-${origin.ex}-${origin.ey}`;
-          if (!drawnEyes.has(eyeKey)) {
-            drawnEyes.add(eyeKey);
-            const drawer = cornerSquares[shapePath] ?? cornerSquares["square"];
+          if (partConfig.isSingle === false) {
+            // Per-module: every dark pixel gets the same isolated shape (no neighbor blending)
+            const drawer =
+              neighborShapes[shapePath] ?? neighborShapes["square"];
             pathsD.cornerSquare += drawer(
-              origin.ex + effectiveMargin,
-              origin.ey + effectiveMargin,
-              7,
+              x + effectiveMargin,
+              y + effectiveMargin,
+              { t: false, r: false, b: false, l: false },
+              scale,
             );
+          } else {
+            // Single shape per eye (isSingle: true or undefined)
+            const origin = getEyeOrigin(x, y, matrixSize);
+            if (!origin) continue;
+            const eyeKey = `sq-${origin.ex}-${origin.ey}`;
+            if (!drawnEyes.has(eyeKey)) {
+              drawnEyes.add(eyeKey);
+              const drawer =
+                cornerSquares[shapePath] ?? cornerSquares["square"];
+              pathsD.cornerSquare += drawer(
+                origin.ex + effectiveMargin,
+                origin.ey + effectiveMargin,
+                7,
+              );
+            }
           }
         } else {
-          // cornerDot — always draw as one 3×3 block per eye
-          const origin = getEyeOrigin(x, y, matrixSize);
-          if (!origin) continue;
-          const eyeKey = `dot-${origin.ex}-${origin.ey}`;
-          if (!drawnEyes.has(eyeKey)) {
-            drawnEyes.add(eyeKey);
-            const drawer = cornerDots[shapePath] ?? cornerDots["square"];
+          // cornerDot
+          if (partConfig.isSingle === false) {
+            // Per-module: every dark pixel gets the same isolated shape (no neighbor blending)
+            const drawer =
+              neighborShapes[shapePath] ?? neighborShapes["square"];
             pathsD.cornerDot += drawer(
-              origin.ex + 2 + effectiveMargin,
-              origin.ey + 2 + effectiveMargin,
-              3,
+              x + effectiveMargin,
+              y + effectiveMargin,
+              { t: false, r: false, b: false, l: false },
+              scale,
             );
+          } else {
+            // Single shape for the 3×3 ball (isSingle: true or undefined)
+            const origin = getEyeOrigin(x, y, matrixSize);
+            if (!origin) continue;
+            const eyeKey = `dot-${origin.ex}-${origin.ey}`;
+            if (!drawnEyes.has(eyeKey)) {
+              drawnEyes.add(eyeKey);
+              const drawer = cornerDots[shapePath] ?? cornerDots["square"];
+              pathsD.cornerDot += drawer(
+                origin.ex + 2 + effectiveMargin,
+                origin.ey + 2 + effectiveMargin,
+                3,
+              );
+            }
           }
         }
         continue;
