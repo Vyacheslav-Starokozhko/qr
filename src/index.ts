@@ -60,6 +60,15 @@ function isInnerEyeStart(x: number, y: number, size: number): boolean {
   return positions.some((p) => p.x === x && p.y === y);
 }
 
+function isOuterEyeStart(x: number, y: number, size: number): boolean {
+  const positions = [
+    { x: 0, y: 0 },
+    { x: size - 7, y: 0 },
+    { x: 0, y: size - 7 },
+  ];
+  return positions.some((p) => p.x === x && p.y === y);
+}
+
 // Gradient generator bound to a specific zone (bx, by, bw, bh)
 function generateGradientDef(
   id: string,
@@ -733,6 +742,19 @@ export async function QRCodeGenerate(
       // --- Icon / custom-icon rendering (<use> + <symbol>) ---
       let drawSize = 1;
 
+      if (zone === "cornerSquare" && partConfig.isSingle) {
+        if (!isOuterEyeStart(x, y, matrixSize)) continue;
+        drawSize = 7;
+        for (let dy = 0; dy < 7; dy++) {
+          for (let dx = 0; dx < 7; dx++) {
+            // Leave the inner 3×3 cornerDot area free so it renders separately
+            if (dx >= 2 && dx <= 4 && dy >= 2 && dy <= 4) continue;
+            if (y + dy < matrixSize && x + dx < matrixSize)
+              skipMatrix[y + dy][x + dx] = true;
+          }
+        }
+      }
+
       if (zone === "cornerDot" && partConfig.isSingle) {
         if (!isInnerEyeStart(x, y, matrixSize)) continue;
         drawSize = 3;
@@ -922,14 +944,20 @@ export async function QRCodeGenerate(
         const topH = inset.y;
         const bottomH = frameH - (inset.y + inset.height);
         if (topH >= bottomH) {
-          zoneX = inset.x; zoneY = 0;
-          zoneW = inset.width; zoneH = topH;
-          mTop = gapMargin * 0.3; mBottom = gapMargin;
+          zoneX = inset.x;
+          zoneY = 0;
+          zoneW = inset.width;
+          zoneH = topH;
+          mTop = gapMargin * 0.3;
+          mBottom = gapMargin;
           vAnchor = "qr"; // bottom of top-strip → adjacent to QR
         } else {
-          zoneX = inset.x; zoneY = inset.y + inset.height;
-          zoneW = inset.width; zoneH = bottomH;
-          mTop = gapMargin; mBottom = gapMargin * 0.3;
+          zoneX = inset.x;
+          zoneY = inset.y + inset.height;
+          zoneW = inset.width;
+          zoneH = bottomH;
+          mTop = gapMargin;
+          mBottom = gapMargin * 0.3;
           vAnchor = "qr"; // top of bottom-strip → adjacent to QR
         }
         break;
@@ -944,7 +972,8 @@ export async function QRCodeGenerate(
         zoneY = cy - estimatedH / 2;
         zoneW = customW;
         zoneH = estimatedH;
-        mTop = 0; mBottom = 0;
+        mTop = 0;
+        mBottom = 0;
         vAnchor = "center";
         break;
       }
