@@ -113,10 +113,10 @@ function createSymbol(id: string, part: QrPartOptions): string {
     return "";
   }
 
-  if (shape.type === "custom-icon" && shape.customPath) {
+  if (shape.type === "custom-icon" && shape.path) {
     return `
-        <symbol id="${id}" viewBox="${shape.customViewBox || "0 0 24 24"}">
-          <path d="${shape.customPath}" />
+        <symbol id="${id}" viewBox="${shape.viewBox || "0 0 24 24"}">
+          <path d="${shape.path}" />
         </symbol>
       `;
   }
@@ -526,7 +526,7 @@ async function svgToCanvas(
 
 /** Mulberry32 seeded PRNG — returns values in [0, 1). */
 function mulberry32(seed: number): () => number {
-  let s = (seed >>> 0) || 1;
+  let s = seed >>> 0 || 1;
   return function () {
     s = (s + 0x6d2b79f5) >>> 0;
     let t = Math.imul(s ^ (s >>> 15), 1 | s);
@@ -770,7 +770,7 @@ function generateDecorationsSvg(
       } else {
         // custom-path
         viewBox = shapeDef.viewBox ?? "0 0 24 24";
-        symContent = `<path d="${shapeDef.d}" />`;
+        symContent = `<path d="${shapeDef.path}" />`;
       }
 
       defsStr += `<symbol id="${symId}" viewBox="${viewBox}">${symContent}</symbol>`;

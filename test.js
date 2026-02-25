@@ -112,7 +112,10 @@ const fullWLogo = path1 + " " + path2; // Just concatenating
     height: 500,
     borderRadius: 20,
     backgroundOptions: { color: "#fff0f3" },
-    dotsOptions: { shape: { type: "figure", path: "dots" }, color: "#c0392b" },
+    dotsOptions: {
+      shape: { type: "figure", path: "dots" },
+      color: "#c0392b",
+    },
     cornersSquareOptions: {
       shape: { type: "figure", path: "extra-rounded" },
       color: "#c0392b",
@@ -193,7 +196,10 @@ const fullWLogo = path1 + " " + path2; // Just concatenating
     width: 500,
     height: 500,
     backgroundOptions: { color: "#fff" },
-    dotsOptions: { shape: { type: "figure", path: "rounded" }, color: "#333" },
+    dotsOptions: {
+      shape: { type: "figure", path: "rounded" },
+      color: "#333",
+    },
     cornersSquareOptions: {
       shape: { type: "figure", path: "extra-rounded" },
       color: "#e74c3c",
@@ -340,7 +346,7 @@ const fullWLogo = path1 + " " + path2; // Just concatenating
             rotation: 90,
             colorStops: [
               { offset: "0%", color: "#6c5ce7" },
-              { offset: "100%", color: "#00d4ff" },
+              { offset: "100%", color: "#000000" },
             ],
           },
           margin: 20,
@@ -548,7 +554,7 @@ const fullWLogo = path1 + " " + path2; // Just concatenating
     cornersDotOptions: {
       shape: { type: "icon", path: "inner-eye-dots" },
       // Example custom-icon:
-      // shape: { type: "custom-icon", customPath: fullWLogo, customViewBox: "0 0 41 36" },
+      // shape: { type: "custom-icon", path: fullWLogo, viewBox: "0 0 41 36" },
       gradient: {
         type: "linear",
         rotation: 90,

@@ -104,10 +104,8 @@ export type CornerDotFigure =
 
 export type QrShape = {
   type?: ShapeType;
-  path?: QRShapesType | FigureShape; // icon key or figure name
-  viewBox?: string; // auto-detected for icon shapes
-  customPath?: string; // only for "custom-icon"
-  customViewBox?: string; // only for "custom-icon"
+  path?: QRShapesType | FigureShape;
+  viewBox?: string;
 };
 
 export type QrPartOptions = {
@@ -227,7 +225,7 @@ export type QrDecorationBuiltinShape =
 export type QrDecorationShape =
   | QrDecorationBuiltinShape
   | { type: "icon"; path: QRShapesType }
-  | { type: "custom-path"; d: string; viewBox?: string }
+  | { type: "custom-path"; path: string; viewBox?: string }
   | { type: "image"; source: string };
 
 // Where decorations are placed within the margin zone
