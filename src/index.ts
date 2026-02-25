@@ -11,6 +11,8 @@ import {
   QrImagePosition,
   Gradient,
   QRScanState,
+  QrDecoration,
+  QrDecorationBuiltinShape,
 } from "./types";
 import { detectFrameInset } from "./frame-inset";
 import { exportQR, FileExtension, ExportOptions } from "./export";
@@ -520,6 +522,272 @@ async function svgToCanvas(
   });
 }
 
+// ─── Decoration helpers ───────────────────────────────────────────────────────
+
+/** Mulberry32 seeded PRNG — returns values in [0, 1). */
+function mulberry32(seed: number): () => number {
+  let s = (seed >>> 0) || 1;
+  return function () {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function _f(n: number): string {
+  return n.toFixed(3);
+}
+
+function _starPath(
+  cx: number,
+  cy: number,
+  outerR: number,
+  innerR: number,
+  points: number,
+): string {
+  let d = "";
+  for (let i = 0; i < points * 2; i++) {
+    const angle = (i * Math.PI) / points - Math.PI / 2;
+    const r = i % 2 === 0 ? outerR : innerR;
+    const x = cx + r * Math.cos(angle);
+    const y = cy + r * Math.sin(angle);
+    d += (i === 0 ? "M" : "L") + _f(x) + "," + _f(y);
+  }
+  return d + "Z";
+}
+
+/** Render a single built-in geometric decoration shape centered at (cx, cy). */
+function _renderBuiltinDecoration(
+  shape: QrDecorationBuiltinShape,
+  cx: number,
+  cy: number,
+  size: number,
+  color: string,
+  opacity: number,
+): string {
+  const r = size / 2;
+  const op = opacity < 1 ? ` opacity="${_f(opacity)}"` : "";
+  const fill = `fill="${color}"`;
+
+  switch (shape) {
+    case "dot":
+      return `<circle cx="${_f(cx)}" cy="${_f(cy)}" r="${_f(r)}" ${fill}${op}/>`;
+
+    case "ring":
+      return `<circle cx="${_f(cx)}" cy="${_f(cy)}" r="${_f(r * 0.65)}" fill="none" stroke="${color}" stroke-width="${_f(r * 0.5)}"${op}/>`;
+
+    case "square":
+      return `<rect x="${_f(cx - r)}" y="${_f(cy - r)}" width="${_f(size)}" height="${_f(size)}" ${fill}${op}/>`;
+
+    case "diamond": {
+      const d = `M${_f(cx)},${_f(cy - r)}L${_f(cx + r)},${_f(cy)}L${_f(cx)},${_f(cy + r)}L${_f(cx - r)},${_f(cy)}Z`;
+      return `<path d="${d}" ${fill}${op}/>`;
+    }
+
+    case "star":
+      return `<path d="${_starPath(cx, cy, r, r * 0.45, 5)}" ${fill}${op}/>`;
+
+    case "star4":
+      return `<path d="${_starPath(cx, cy, r, r * 0.35, 4)}" ${fill}${op}/>`;
+
+    case "cross": {
+      const t = r * 0.3;
+      const d =
+        `M${_f(cx - t)},${_f(cy - r)}H${_f(cx + t)}V${_f(cy - t)}` +
+        `H${_f(cx + r)}V${_f(cy + t)}H${_f(cx + t)}V${_f(cy + r)}` +
+        `H${_f(cx - t)}V${_f(cy + t)}H${_f(cx - r)}V${_f(cy - t)}H${_f(cx - t)}Z`;
+      return `<path d="${d}" ${fill}${op}/>`;
+    }
+
+    case "triangle": {
+      const d = `M${_f(cx)},${_f(cy - r)}L${_f(cx + r * 0.866)},${_f(cy + r * 0.5)}L${_f(cx - r * 0.866)},${_f(cy + r * 0.5)}Z`;
+      return `<path d="${d}" ${fill}${op}/>`;
+    }
+
+    default:
+      return `<circle cx="${_f(cx)}" cy="${_f(cy)}" r="${_f(r)}" ${fill}${op}/>`;
+  }
+}
+
+/**
+ * Generates an SVG `<g>` element containing all decoration layers scattered in
+ * the empty margin space around the QR matrix.
+ *
+ * Decorations are rendered INSIDE the clip group, so they are always confined
+ * to the QR background zone (including being hidden in rounded corners).
+ *
+ * Shape types supported:
+ *  - Built-in strings: "dot" | "ring" | "square" | "diamond" | "star" | "star4" | "cross" | "triangle"
+ *  - { type: "icon"; path }  — icon from the built-in shapes registry
+ *  - { type: "custom-path"; d; viewBox? } — custom SVG path data
+ *  - { type: "image"; source } — any image URL or base64 data-URI
+ */
+function generateDecorationsSvg(
+  decorations: QrDecoration[],
+  effectiveMargin: number,
+  matrixSize: number,
+  fullSize: number,
+): string {
+  if (!decorations || decorations.length === 0) return "";
+
+  const qmStart = effectiveMargin;
+  const qmEnd = effectiveMargin + matrixSize;
+
+  let defsStr = "";
+  let elemsStr = "";
+
+  for (let layerIdx = 0; layerIdx < decorations.length; layerIdx++) {
+    const dec = decorations[layerIdx];
+    const shapeDef = dec.shape ?? "dot";
+    const color = dec.color ?? "#000000";
+    const size = dec.size ?? 0.6;
+    const opacity = dec.opacity ?? 1;
+    const seed = dec.seed ?? 42;
+    const placement = dec.placement ?? "scatter";
+    // Offset seed per layer so two layers with the same seed still differ
+    const rng = mulberry32(seed ^ (layerIdx * 0x9e3779b9));
+    const halfSize = size / 2;
+
+    // ── Placement zones ──────────────────────────────────────────────────────
+    const topBand = { x1: 0, y1: 0, x2: fullSize, y2: qmStart };
+    const bottomBand = { x1: 0, y1: qmEnd, x2: fullSize, y2: fullSize };
+    const leftBand = { x1: 0, y1: qmStart, x2: qmStart, y2: qmEnd };
+    const rightBand = { x1: qmEnd, y1: qmStart, x2: fullSize, y2: qmEnd };
+    const tlCorner = { x1: 0, y1: 0, x2: qmStart, y2: qmStart };
+    const trCorner = { x1: qmEnd, y1: 0, x2: fullSize, y2: qmStart };
+    const blCorner = { x1: 0, y1: qmEnd, x2: qmStart, y2: fullSize };
+    const brCorner = { x1: qmEnd, y1: qmEnd, x2: fullSize, y2: fullSize };
+
+    type Zone = { x1: number; y1: number; x2: number; y2: number };
+    let zones: Zone[];
+    switch (placement) {
+      case "corners":
+        zones = [tlCorner, trCorner, blCorner, brCorner];
+        break;
+      case "top":
+        zones = [topBand];
+        break;
+      case "bottom":
+        zones = [bottomBand];
+        break;
+      case "left":
+        zones = [leftBand];
+        break;
+      case "right":
+        zones = [rightBand];
+        break;
+      case "edges":
+      case "scatter":
+      default:
+        zones = [topBand, bottomBand, leftBand, rightBand];
+    }
+
+    const validZones = zones.filter(
+      (z) => z.x2 - z.x1 >= size && z.y2 - z.y1 >= size,
+    );
+    if (validZones.length === 0) continue;
+
+    // Auto count: ~35 % area density
+    const totalArea = validZones.reduce(
+      (sum, z) => sum + (z.x2 - z.x1) * (z.y2 - z.y1),
+      0,
+    );
+    const slotArea = size * 1.6 * (size * 1.6);
+    const autoCount = Math.max(1, Math.round((totalArea / slotArea) * 0.35));
+    const count = dec.count ?? Math.min(autoCount, 80);
+
+    // ── Scatter placement ────────────────────────────────────────────────────
+    const placed: { cx: number; cy: number }[] = [];
+    const minDist = size * 1.3;
+    const zoneAreas = validZones.map((z) => (z.x2 - z.x1) * (z.y2 - z.y1));
+    const totalZoneArea = zoneAreas.reduce((a, b) => a + b, 0);
+    let attempts = 0;
+    const maxAttempts = count * 40;
+
+    while (placed.length < count && attempts < maxAttempts) {
+      attempts++;
+      let pick = rng() * totalZoneArea;
+      let zoneIdx = validZones.length - 1;
+      for (let i = 0; i < zoneAreas.length; i++) {
+        pick -= zoneAreas[i];
+        if (pick <= 0) {
+          zoneIdx = i;
+          break;
+        }
+      }
+      const zone = validZones[zoneIdx];
+      const cx =
+        zone.x1 + halfSize + rng() * Math.max(0, zone.x2 - zone.x1 - size);
+      const cy =
+        zone.y1 + halfSize + rng() * Math.max(0, zone.y2 - zone.y1 - size);
+
+      if (
+        placed.some((p) => {
+          const dx = p.cx - cx;
+          const dy = p.cy - cy;
+          return Math.sqrt(dx * dx + dy * dy) < minDist;
+        })
+      )
+        continue;
+      placed.push({ cx, cy });
+    }
+
+    if (placed.length === 0) continue;
+
+    const opAttr = opacity < 1 ? ` opacity="${_f(opacity)}"` : "";
+
+    // ── Render based on shape type ───────────────────────────────────────────
+    if (typeof shapeDef === "string") {
+      // Built-in geometric shape
+      for (const { cx, cy } of placed) {
+        elemsStr += _renderBuiltinDecoration(
+          shapeDef as QrDecorationBuiltinShape,
+          cx,
+          cy,
+          size,
+          color,
+          opacity,
+        );
+      }
+    } else if (shapeDef.type === "image") {
+      // Raster / SVG image
+      for (const { cx, cy } of placed) {
+        elemsStr += `<image href="${shapeDef.source}" x="${_f(cx - halfSize)}" y="${_f(cy - halfSize)}" width="${_f(size)}" height="${_f(size)}" preserveAspectRatio="xMidYMid meet"${opAttr}/>`;
+      }
+    } else {
+      // icon or custom-path — define a reusable <symbol> then <use> it
+      const symId = `_dec_sym_${layerIdx}`;
+      let symContent = "";
+      let viewBox = "0 0 24 24";
+
+      if (shapeDef.type === "icon") {
+        const entry =
+          shapes[shapeDef.path as keyof typeof shapes] ??
+          shapes["inner-eye-square"];
+        viewBox = entry.viewBox ?? "0 0 24 24";
+        symContent = `<path d="${entry.d}" />`;
+      } else {
+        // custom-path
+        viewBox = shapeDef.viewBox ?? "0 0 24 24";
+        symContent = `<path d="${shapeDef.d}" />`;
+      }
+
+      defsStr += `<symbol id="${symId}" viewBox="${viewBox}">${symContent}</symbol>`;
+
+      for (const { cx, cy } of placed) {
+        elemsStr += `<use href="#${symId}" x="${_f(cx - halfSize)}" y="${_f(cy - halfSize)}" width="${_f(size)}" height="${_f(size)}" fill="${color}"${opAttr}/>`;
+      }
+    }
+  }
+
+  if (!elemsStr) return "";
+  const defsBlock = defsStr ? `<defs>${defsStr}</defs>` : "";
+  return `<g>${defsBlock}${elemsStr}</g>`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function QRCodeGenerate(
   options: Options,
 ): Promise<QRGenerateResult> {
@@ -892,12 +1160,24 @@ export async function QRCodeGenerate(
       : "";
   const clipAttr = borderRadius > 0 ? `clip-path="url(#qr-clip)"` : "";
 
-  // The inner QR SVG content (background + dots + eyes + logos)
+  // Decorations: shapes scattered in the empty margin space outside the QR matrix.
+  // Rendered outside the clip group so they are visible in rounded-corner areas too.
+  const decorationsSvg = generateDecorationsSvg(
+    config.decorations ?? [],
+    effectiveMargin,
+    matrixSize,
+    fullSize,
+  );
+
+  // The inner QR SVG content (background + decorations + dots + eyes + logos)
+  // Decorations are placed inside the clip group so they are always confined
+  // to the QR background zone (hidden outside the rounded-corner clip boundary).
   const qrContent = `
     <defs>${defsString}${clipPathDef}</defs>
     <g ${clipAttr}>
       <rect width="${fullSize}" height="${fullSize}" fill="${getBackgroundFill()}" ${rxAttr}/>
       ${config.backgroundOptions?.image ? `<image href="${config.backgroundOptions.image}" width="${fullSize}" height="${fullSize}" preserveAspectRatio="none" />` : ""}
+      ${decorationsSvg}
       ${generateDotsLayer()}
       ${generateEyeLayer("cornerSquare", "grad-sq", config.cornersSquareOptions)}
       ${generateEyeLayer("cornerDot", "grad-dot", config.cornersDotOptions)}
@@ -928,8 +1208,16 @@ export async function QRCodeGenerate(
   ): string {
     if (!label.text) return "";
     const text = label.text;
+    const isRounded = label.style === "rounded";
     const gapMargin = label.margin ?? 8;
-    const pos = label.position ?? "bottom";
+    // For rounded arc text, default to "top" so omitting position still works
+    const pos = label.position ?? (isRounded ? "top" : "bottom");
+    // Pre-escape text so both flat and arc paths can use it
+    const escaped = text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
 
     // ── Zone: area allocated for the label (frame-px coords) ──────────────────
     // For top / bottom / auto we use the full frame width so the label is
@@ -1067,6 +1355,95 @@ export async function QRCodeGenerate(
         : zoneY + mTop + fontSize / 2;
     }
 
+    // ── Rounded: curved text along the QR circle arc ──────────────────────────
+    // Arc radius is derived from the QR background circle so the text always
+    // wraps around the QR at its boundary — no manual radius tuning needed.
+    //
+    // "top"    → CCW arc over the top  (ascenders face outward / up)
+    // "bottom" → CW  arc under the bottom (letters concave-up)
+    // "auto"   → picks top or bottom by available strip height
+    // default (no position set) → top arc
+    //
+    // dominant-baseline="central" centers glyphs vertically ON the arc path
+    // so text is perfectly centered inside the arc background band.
+    if (isRounded && pos !== "center" && pos !== "custom") {
+      // Arc wraps the QR background circle — center = QR inset centre,
+      // radius = QR circle radius + gapMargin (just outside the QR background).
+      const arcCX = inset.x + inset.width / 2;
+      const arcCY = inset.y + inset.height / 2;
+      const arcR = Math.min(inset.width, inset.height) / 2 + gapMargin;
+
+      if (arcR <= 0) return "";
+
+      // top / auto → arc over the top; bottom → arc under the bottom
+      const isTopArc = pos !== "bottom";
+
+      const ax1 = (arcCX - arcR).toFixed(2);
+      const ax2 = (arcCX + arcR).toFixed(2);
+      const acy = arcCY.toFixed(2);
+      // top  → sweep=0 (CCW) — arc goes over the top of the frame circle
+      // bottom → sweep=1 (CW) — arc goes under the bottom of the frame circle
+      const sweep = isTopArc ? 0 : 1;
+      const arcPath = `M ${ax1},${acy} A ${arcR.toFixed(2)} ${arcR.toFixed(2)} 0 0 ${sweep} ${ax2},${acy}`;
+
+      // Unique path ID per document
+      const arcId = `_larc_${Math.round(arcCX)}_${Math.round(arcCY)}_${isTopArc ? "t" : "b"}`;
+
+      // Text fill (colour or gradient)
+      const arcNatW = text.length * fontSize * CHAR_RATIO;
+      let arcDefsStr = "";
+      let arcTextFill: string;
+      if (label.fontGradient) {
+        const arcTextY = isTopArc
+          ? arcCY - arcR - fontSize / 2
+          : arcCY + arcR - fontSize / 2;
+        arcDefsStr += generateGradientDef(
+          "grad-arc-text",
+          label.fontGradient,
+          arcCX - arcNatW / 2,
+          arcTextY,
+          arcNatW,
+          fontSize,
+        );
+        arcTextFill = "url(#grad-arc-text)";
+      } else {
+        arcTextFill = label.fontColor ?? "#000000";
+      }
+
+      // Optional background: thick stroked arc band centered on the path
+      let arcBgStr = "";
+      const bgStrokeW = (fontSize * 1.8).toFixed(2);
+      if (label.fontBackgroundGradient) {
+        arcDefsStr += generateGradientDef(
+          "grad-arc-bg",
+          label.fontBackgroundGradient,
+          arcCX - arcR,
+          arcCY - arcR,
+          arcR * 2,
+          arcR * 2,
+        );
+        arcBgStr = `<path d="${arcPath}" fill="none" stroke="url(#grad-arc-bg)" stroke-width="${bgStrokeW}" stroke-linecap="round"/>`;
+      } else if (label.fontBackgroundColor) {
+        arcBgStr = `<path d="${arcPath}" fill="none" stroke="${label.fontBackgroundColor}" stroke-width="${bgStrokeW}" stroke-linecap="round"/>`;
+      }
+
+      const textAttrs: string[] = [
+        `font-size="${fontSize.toFixed(2)}"`,
+        `font-family="${label.fontFamily ?? "sans-serif"}"`,
+        // Centers glyphs vertically ON the arc path (inside the background band)
+        `dominant-baseline="central"`,
+        `fill="${arcTextFill}"`,
+      ];
+      if (label.fontWeight != null)
+        textAttrs.push(`font-weight="${label.fontWeight}"`);
+      if (label.fontStyle) textAttrs.push(`font-style="${label.fontStyle}"`);
+
+      const arcDefsBlock = `<defs>${arcDefsStr}<path id="${arcId}" d="${arcPath}" fill="none"/></defs>`;
+      const arcText = `<text ${textAttrs.join(" ")}><textPath href="#${arcId}" startOffset="50%" text-anchor="middle">${escaped}</textPath></text>`;
+      return `${arcDefsBlock}${arcBgStr}${arcText}`;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     // ── textLength — overflow protection only, never stretch ──────────────────
     // Only applied when the estimated natural width exceeds labelW (compress to fit).
     // Short / medium text is centred at its natural width without distortion.
@@ -1139,12 +1516,6 @@ export async function QRCodeGenerate(
       textAttrs.push(`lengthAdjust="spacingAndGlyphs"`);
     }
 
-    const escaped = text
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-
     const defsBlock = defsStr ? `<defs>${defsStr}</defs>` : "";
     return `${defsBlock}${bgStr}<text ${textAttrs.join(" ")}>${escaped}</text>`;
   }
@@ -1194,9 +1565,14 @@ export async function QRCodeGenerate(
     const scaleX = inset.width / fullSize;
     const scaleY = inset.height / fullSize;
 
-    const labelSvg = frame.label
-      ? renderFrameLabel(frame.label, inset, frame.width, frame.height)
-      : "";
+    // Collect all labels: single `label` (backward compat) + `labels` array
+    const allLabels = [
+      ...(frame.label ? [frame.label] : []),
+      ...(frame.labels ?? []),
+    ];
+    const labelSvg = allLabels
+      .map((l) => renderFrameLabel(l, inset, frame.width, frame.height))
+      .join("");
 
     return finalizeResult(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${frame.width} ${frame.height}" width="${svgW}" height="${svgH}">
       <!-- Frame image (behind everything) -->

@@ -29,6 +29,362 @@ const path2 =
 const fullWLogo = path1 + " " + path2; // Just concatenating
 
 (async () => {
+  // --- Decoration showcase: dots scattered in the margin ---
+  const { svg: decDots } = await QRCodeGenerate({
+    data: "https://example.com",
+    margin: 4,
+    width: 500,
+    height: 500,
+    backgroundOptions: { color: "#ffffff" },
+    dotsOptions: {
+      shape: { type: "figure", path: "square" },
+      color: "#000000",
+    },
+    cornersSquareOptions: {
+      shape: { type: "figure", path: "square" },
+      color: "#000000",
+      isSingle: true,
+    },
+    cornersDotOptions: {
+      shape: { type: "figure", path: "square" },
+      color: "#000000",
+      isSingle: true,
+    },
+    decorations: [
+      {
+        shape: "dot",
+        color: "#e74c3c",
+        size: 0.7,
+        opacity: 0.9,
+        placement: "scatter",
+        seed: 1,
+      },
+    ],
+  });
+
+  // --- Decoration showcase: stars + rings in margin (circle QR) ---
+  const { svg: decStars } = await QRCodeGenerate({
+    data: "https://example.com",
+    margin: 8,
+    width: 500,
+    height: 500,
+    borderRadius: 100,
+    backgroundOptions: { color: "#1a1a2e" },
+    dotsOptions: {
+      shape: { type: "figure", path: "square" },
+      color: "#ffffff",
+    },
+    cornersSquareOptions: {
+      shape: { type: "figure", path: "square" },
+      color: "#00d4ff",
+      isSingle: true,
+    },
+    cornersDotOptions: {
+      shape: { type: "figure", path: "square" },
+      color: "#00d4ff",
+      isSingle: true,
+    },
+    decorations: [
+      {
+        shape: "star",
+        color: "#ffd700",
+        size: 0.9,
+        opacity: 0.85,
+        placement: "scatter",
+        seed: 7,
+      },
+      {
+        shape: "ring",
+        color: "#00d4ff",
+        size: 0.55,
+        opacity: 0.5,
+        placement: "scatter",
+        seed: 99,
+      },
+    ],
+  });
+
+  // --- Decoration showcase: icon shape (heart from icon registry) ---
+  const { svg: decIconHeart } = await QRCodeGenerate({
+    data: "https://example.com",
+    margin: 5,
+    width: 500,
+    height: 500,
+    borderRadius: 20,
+    backgroundOptions: { color: "#fff0f3" },
+    dotsOptions: { shape: { type: "figure", path: "dots" }, color: "#c0392b" },
+    cornersSquareOptions: {
+      shape: { type: "figure", path: "extra-rounded" },
+      color: "#c0392b",
+      isSingle: true,
+    },
+    cornersDotOptions: {
+      shape: { type: "figure", path: "dot" },
+      color: "#c0392b",
+      isSingle: true,
+    },
+    decorations: [
+      {
+        // Use any icon from the built-in shape registry — same keys as dot shapes
+        shape: { type: "icon", path: "heart" },
+        color: "#e74c3c",
+        size: 1.0,
+        opacity: 0.7,
+        placement: "scatter",
+        seed: 3,
+      },
+      {
+        shape: { type: "icon", path: "heart" },
+        color: "#ff6b81",
+        size: 0.5,
+        opacity: 0.45,
+        placement: "scatter",
+        seed: 77,
+      },
+    ],
+  });
+
+  // --- Decoration showcase: custom SVG path ---
+  const customArrowPath =
+    "M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"; // layered chevron
+  const { svg: decCustomPath } = await QRCodeGenerate({
+    data: "https://example.com",
+    margin: 5,
+    width: 500,
+    height: 500,
+    borderRadius: 10,
+    backgroundOptions: { color: "#f0f4ff" },
+    dotsOptions: {
+      shape: { type: "figure", path: "square" },
+      color: "#2d3436",
+    },
+    cornersSquareOptions: {
+      shape: { type: "figure", path: "square" },
+      color: "#0984e3",
+      isSingle: true,
+    },
+    cornersDotOptions: {
+      shape: { type: "figure", path: "square" },
+      color: "#0984e3",
+      isSingle: true,
+    },
+    decorations: [
+      {
+        // Provide your own SVG path data — same viewBox system as QR icons
+        shape: {
+          type: "custom-path",
+          d: customArrowPath,
+          viewBox: "0 0 24 24",
+        },
+        color: "#0984e3",
+        size: 0.8,
+        opacity: 0.6,
+        placement: "scatter",
+        seed: 21,
+      },
+    ],
+  });
+
+  // --- Decoration showcase: borderRadius corners filled with diamonds ---
+  const { svg: decRounded } = await QRCodeGenerate({
+    data: "https://example.com",
+    margin: 3,
+    borderRadius: 30,
+    width: 500,
+    height: 500,
+    backgroundOptions: { color: "#fff" },
+    dotsOptions: { shape: { type: "figure", path: "rounded" }, color: "#333" },
+    cornersSquareOptions: {
+      shape: { type: "figure", path: "extra-rounded" },
+      color: "#e74c3c",
+      isSingle: true,
+    },
+    cornersDotOptions: {
+      shape: { type: "figure", path: "dot" },
+      color: "#e74c3c",
+      isSingle: true,
+    },
+    decorations: [
+      {
+        shape: "diamond",
+        color: "#e74c3c",
+        size: 0.65,
+        opacity: 0.7,
+        placement: "scatter",
+        seed: 42,
+      },
+    ],
+  });
+
+  // --- Decoration showcase: corner-only stars for borderRadius QR ---
+  const { svg: decCornerStars } = await QRCodeGenerate({
+    data: "https://example.com",
+    margin: 5,
+    borderRadius: 50,
+    width: 500,
+    height: 500,
+    backgroundOptions: { color: "#fff8f0" },
+    dotsOptions: {
+      shape: { type: "figure", path: "classy-rounded" },
+      color: "#2d3436",
+    },
+    cornersSquareOptions: {
+      shape: { type: "figure", path: "extra-rounded" },
+      color: "#6c5ce7",
+      isSingle: true,
+    },
+    cornersDotOptions: {
+      shape: { type: "figure", path: "dot" },
+      color: "#6c5ce7",
+      isSingle: true,
+    },
+    decorations: [
+      {
+        shape: "star4",
+        color: "#6c5ce7",
+        size: 1.1,
+        opacity: 0.8,
+        placement: "corners",
+        seed: 12,
+      },
+      {
+        shape: "dot",
+        color: "#fd79a8",
+        size: 0.45,
+        opacity: 0.6,
+        placement: "edges",
+        seed: 55,
+      },
+    ],
+  });
+
+  fs.writeFileSync("dec_dots.svg", decDots);
+  fs.writeFileSync("dec_stars.svg", decStars);
+  fs.writeFileSync("dec_rounded.svg", decRounded);
+  fs.writeFileSync("dec_corner_stars.svg", decCornerStars);
+  fs.writeFileSync("dec_icon_heart.svg", decIconHeart);
+  fs.writeFileSync("dec_custom_path.svg", decCustomPath);
+
+  // --- Rounded labels: top + bottom arcs hugging the outer frame circle ---
+  const { svg: labelRounded } = await QRCodeGenerate({
+    data: "https://wiki.org",
+    margin: 15,
+    width: 500,
+    height: 500,
+    borderRadius: 100,
+    frame: {
+      source: frameImg,
+      width: 1000,
+      height: 1000,
+      inset: { width: 500, height: 500 },
+      // Use `labels` array for multiple arc texts
+      labels: [
+        {
+          text: "SEE WHY IT'S SUPER",
+          style: "rounded", // top arc (default when no position given)
+          fontFamily: "Arial, sans-serif",
+          fontWeight: 700,
+          fontColor: "#ffffff",
+          margin: 20,
+        },
+        {
+          text: "SCAN ME",
+          style: "rounded",
+          position: "bottom", // bottom arc
+          fontFamily: "Arial, sans-serif",
+          fontWeight: 700,
+          fontColor: "#ffffff",
+          margin: 20,
+        },
+      ],
+    },
+    backgroundOptions: { color: "#1a1a2e" },
+    images: [],
+    dotsOptions: {
+      shape: { type: "figure", path: "square" },
+      color: "#ffffff",
+    },
+    cornersSquareOptions: {
+      shape: { type: "figure", path: "square" },
+      color: "#00d4ff",
+      isSingle: true,
+    },
+    cornersDotOptions: {
+      shape: { type: "figure", path: "square" },
+      color: "#00d4ff",
+      isSingle: true,
+    },
+  });
+
+  // --- Rounded labels: gradient arc background ---
+  const { svg: labelRoundedGrad } = await QRCodeGenerate({
+    data: "https://wiki.org",
+    margin: 18,
+    width: 500,
+    height: 500,
+    borderRadius: 100,
+    frame: {
+      source: frameImg,
+      width: 1000,
+      height: 1000,
+      inset: { width: 500, height: 500 },
+      labels: [
+        {
+          text: "TURN YOUR CODE",
+          style: "rounded",
+          fontFamily: "Arial, sans-serif",
+          fontWeight: 700,
+          fontColor: "#ffffff",
+          fontBackgroundGradient: {
+            type: "linear",
+            rotation: 90,
+            colorStops: [
+              { offset: "0%", color: "#6c5ce7" },
+              { offset: "100%", color: "#00d4ff" },
+            ],
+          },
+          margin: 20,
+        },
+        {
+          text: "INTO REVENUE",
+          style: "rounded",
+          position: "bottom",
+          fontFamily: "Arial, sans-serif",
+          fontWeight: 700,
+          fontColor: "#ffffff",
+          fontBackgroundGradient: {
+            type: "linear",
+            rotation: 90,
+            colorStops: [
+              { offset: "0%", color: "#6c5ce7" },
+              { offset: "100%", color: "#00d4ff" },
+            ],
+          },
+          margin: 20,
+        },
+      ],
+    },
+    backgroundOptions: { color: "#1a1a2e" },
+    images: [],
+    dotsOptions: {
+      shape: { type: "figure", path: "square" },
+      color: "#ffffff",
+    },
+    cornersSquareOptions: {
+      shape: { type: "figure", path: "square" },
+      color: "#6c5ce7",
+      isSingle: true,
+    },
+    cornersDotOptions: {
+      shape: { type: "figure", path: "square" },
+      color: "#6c5ce7",
+      isSingle: true,
+    },
+  });
+
+  fs.writeFileSync("label_rounded.svg", labelRounded);
+  fs.writeFileSync("label_rounded_grad.svg", labelRoundedGrad);
+
   const { svg: svgWithFrame } = await QRCodeGenerate({
     data: "https://wiki.org",
     margin: 1,
@@ -42,13 +398,12 @@ const fullWLogo = path1 + " " + path2; // Just concatenating
       inset: { width: 500, height: 500 },
       label: {
         text: "SCAN ME",
-        position: "top", // auto-detects the largest free strip
+        position: "top",
         fontFamily: "Arial, sans-serif",
         fontWeight: 700,
         fontColor: "#ffffff",
         fontBackgroundColor: "#1a1a2e",
         margin: 12,
-        // fontSize: 48,            // omit → auto-sized from zone height
       },
     },
     // --- Background ---

@@ -127,6 +127,17 @@ export type QrLabelPosition = "top" | "bottom" | "center" | "custom" | "auto";
 
 export type QrLabel = {
   text?: string;
+  /**
+   * Visual style of the label.
+   * - `"default"` (or omitted) — flat text on a rectangular background band
+   *   (current behaviour).
+   * - `"rounded"` — text curves along the circular arc of the QR background
+   *   zone.  Uses SVG `<textPath>` so the glyphs follow the circle edge:
+   *   concave-down at the top, concave-up at the bottom.  Works best with
+   *   `borderRadius` near 100 (circular QR).  `fontBackgroundColor` /
+   *   `fontBackgroundGradient` render as a thick stroked arc behind the text.
+   */
+  style?: "default" | "rounded";
   fontSize?: number; // px in frame coordinates; auto-computed from zone height when omitted
   fontWeight?: number;
   fontStyle?: string;
@@ -166,7 +177,20 @@ export type QrFrame = {
     width: number; // Width of QR area inside frame
     height: number; // Height of QR area inside frame
   };
+  /** Single label (kept for backward compatibility). */
   label?: QrLabel;
+  /**
+   * Multiple labels rendered in order.
+   * Use this to add both a top and a bottom arc label on a circular frame:
+   * ```
+   * labels: [
+   *   { text: "SEE WHY IT'S SUPER", style: "rounded" },          // top arc
+   *   { text: "SCAN ME", style: "rounded", position: "bottom" },  // bottom arc
+   * ]
+   * ```
+   * When both `label` and `labels` are provided, `label` is rendered first.
+   */
+  labels?: QrLabel[];
 };
 
 // QR Scan result returned by the scan() method on QRGenerateResult
@@ -179,6 +203,56 @@ export type QRScanState = {
   error: string;
   /** The decoded QR data string, or null if scan failed */
   data: string | null;
+};
+
+// Built-in geometric decoration shapes
+export type QrDecorationBuiltinShape =
+  | "dot"
+  | "ring"
+  | "square"
+  | "diamond"
+  | "star"
+  | "star4"
+  | "cross"
+  | "triangle";
+
+/**
+ * Shape of a decoration element.
+ *
+ * - String shortcuts: "dot" | "ring" | "square" | "diamond" | "star" | "star4" | "cross" | "triangle"
+ * - `{ type: "icon"; path }` — one of the built-in icon shapes (same keys used for QR dots)
+ * - `{ type: "custom-path"; d; viewBox? }` — your own SVG path data
+ * - `{ type: "image"; source }` — any image URL or base64 data-URI (PNG, SVG, …)
+ */
+export type QrDecorationShape =
+  | QrDecorationBuiltinShape
+  | { type: "icon"; path: QRShapesType }
+  | { type: "custom-path"; d: string; viewBox?: string }
+  | { type: "image"; source: string };
+
+// Where decorations are placed within the margin zone
+export type QrDecorationPlacement =
+  | "scatter" // random spread across all margin areas (default)
+  | "corners" // only the 4 corner regions
+  | "top" // top margin band only
+  | "bottom" // bottom margin band only
+  | "left" // left margin band only
+  | "right" // right margin band only
+  | "edges"; // all 4 edge bands
+
+/**
+ * A single decoration layer rendered in the empty margin space around the QR
+ * matrix (but still clipped to the QR background zone).
+ * Stack multiple layers for richer effects.
+ */
+export type QrDecoration = {
+  shape?: QrDecorationShape; // default "dot"
+  color?: string; // fill color / stroke color (default "#000000")
+  size?: number; // size in modules (default 0.6)
+  count?: number; // number of elements to place (default: auto-computed)
+  seed?: number; // PRNG seed for reproducible random placement (default 42)
+  opacity?: number; // 0–1 (default 1)
+  placement?: QrDecorationPlacement; // default "scatter"
 };
 
 // The Main Config
@@ -196,6 +270,7 @@ export type Options = {
   };
 
   images?: QrImage[]; // Logos (Array)
+  decorations?: QrDecoration[]; // Decorative shapes in the empty margin space around the QR
   frame?: QrFrame; // Decorative frame around the QR code
 
   qrOptions?: {
