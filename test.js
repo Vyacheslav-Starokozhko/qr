@@ -938,9 +938,10 @@ const fullWLogo = path1 + " " + path2; // Just concatenating
     cornersSquareOptions: {
       color: "#000000",
       shape: {
-        type: "figure",
-        path: "dots",
+        type: "icon",
+        path: "outer-eye-heart",
       },
+      isSingle: true,
     },
     cornersDotOptions: {
       color: "#000000",
