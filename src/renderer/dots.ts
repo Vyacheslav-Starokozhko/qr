@@ -35,12 +35,26 @@ export const neighborShapes: Record<string, NeighborShapeDrawer> = {
     return `M ${f(cx - r)} ${f(cy)} A ${f(r)} ${f(r)} 0 1 0 ${f(cx + r)} ${f(cy)} A ${f(r)} ${f(r)} 0 1 0 ${f(cx - r)} ${f(cy)} Z`;
   },
 
-  // 3. EXTRA-ROUNDED (Maximum rounding. Becomes a circle when no neighbors)
+  // 3. EXTRA-ROUNDED (Maximum rounding. Matches QRDot._drawExtraRounded exactly)
   "extra-rounded": (x, y, n, s = 1) => {
     const cx = x + 0.5;
     const cy = y + 0.5;
-    const r = 0.5 * s; // Radius = half cell size
+    const r = 0.5 * s;
+    const count = +n.l + +n.r + +n.t + +n.b;
 
+    // 2 adjacent neighbors: large arc r=s filling the entire free corner quadrant
+    if (count === 2 && !(n.l && n.r) && !(n.t && n.b)) {
+      if (n.l && n.t) // free: BR
+        return `M ${f(cx + r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy + r)} A ${f(s)} ${f(s)} 0 0 0 ${f(cx + r)} ${f(cy - r)} Z`;
+      if (n.t && n.r) // free: BL
+        return `M ${f(cx + r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy - r)} A ${f(s)} ${f(s)} 0 0 0 ${f(cx + r)} ${f(cy + r)} Z`;
+      if (n.r && n.b) // free: TL
+        return `M ${f(cx - r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy - r)} A ${f(s)} ${f(s)} 0 0 0 ${f(cx - r)} ${f(cy + r)} Z`;
+      // n.l && n.b: free: TR
+      return `M ${f(cx - r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy + r)} A ${f(s)} ${f(s)} 0 0 0 ${f(cx - r)} ${f(cy - r)} Z`;
+    }
+
+    // 0 neighbors → circle; 1 neighbor → semicircle; 2 opposite / 3+ → square
     let path = `M ${f(cx)} ${f(cy - r)}`;
 
     // Top-Right
@@ -63,41 +77,37 @@ export const neighborShapes: Record<string, NeighborShapeDrawer> = {
     return path + " Z";
   },
 
-  // 4. ROUNDED (Moderate rounding. Radius smaller than half the cell)
+  // 4. ROUNDED (Neighbor-count based. Matches QRDot._drawRounded exactly)
   rounded: (x, y, n, s = 1) => {
     const cx = x + 0.5;
     const cy = y + 0.5;
     const r = 0.5 * s;
-    const rad = 0.25 * s; // Half-radius for a softer squircle look
+    const count = +n.l + +n.r + +n.t + +n.b;
 
-    let path = `M ${f(cx)} ${f(cy - r)}`;
+    if (count === 0) return neighborShapes.dots(x, y, n, s);
+    if (count > 2 || (n.l && n.r) || (n.t && n.b)) return neighborShapes.square(x, y, n, s);
 
-    // Top-Right
-    if (n.t || n.r) {
-      path += ` L ${f(cx + r)} ${f(cy - r)} L ${f(cx + r)} ${f(cy)}`;
-    } else {
-      path += ` L ${f(cx + r - rad)} ${f(cy - r)} A ${f(rad)} ${f(rad)} 0 0 1 ${f(cx + r)} ${f(cy - r + rad)} L ${f(cx + r)} ${f(cy)}`;
-    }
-    // Bottom-Right
-    if (n.b || n.r) {
-      path += ` L ${f(cx + r)} ${f(cy + r)} L ${f(cx)} ${f(cy + r)}`;
-    } else {
-      path += ` L ${f(cx + r)} ${f(cy + r - rad)} A ${f(rad)} ${f(rad)} 0 0 1 ${f(cx + r - rad)} ${f(cy + r)} L ${f(cx)} ${f(cy + r)}`;
-    }
-    // Bottom-Left
-    if (n.b || n.l) {
-      path += ` L ${f(cx - r)} ${f(cy + r)} L ${f(cx - r)} ${f(cy)}`;
-    } else {
-      path += ` L ${f(cx - r + rad)} ${f(cy + r)} A ${f(rad)} ${f(rad)} 0 0 1 ${f(cx - r)} ${f(cy + r - rad)} L ${f(cx - r)} ${f(cy)}`;
-    }
-    // Top-Left
-    if (n.t || n.l) {
-      path += ` L ${f(cx - r)} ${f(cy - r)} L ${f(cx)} ${f(cy - r)}`;
-    } else {
-      path += ` L ${f(cx - r)} ${f(cy - r + rad)} A ${f(rad)} ${f(rad)} 0 0 1 ${f(cx - r + rad)} ${f(cy - r)} L ${f(cx)} ${f(cy - r)}`;
+    if (count === 2) {
+      // 3 sharp sides + quarter-circle (r = s/2) at the one free corner
+      if (n.l && n.t) // free: BR
+        return `M ${f(cx + r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy + r)} L ${f(cx)} ${f(cy + r)} A ${f(r)} ${f(r)} 0 0 1 ${f(cx + r)} ${f(cy)} Z`;
+      if (n.t && n.r) // free: BL
+        return `M ${f(cx + r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy)} A ${f(r)} ${f(r)} 0 0 0 ${f(cx)} ${f(cy + r)} Z`;
+      if (n.r && n.b) // free: TL
+        return `M ${f(cx - r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy - r)} L ${f(cx)} ${f(cy - r)} A ${f(r)} ${f(r)} 0 0 1 ${f(cx - r)} ${f(cy)} Z`;
+      // n.l && n.b: free: TR
+      return `M ${f(cx - r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy)} A ${f(r)} ${f(r)} 0 0 0 ${f(cx)} ${f(cy - r)} Z`;
     }
 
-    return path + " Z";
+    // count === 1: flat side facing neighbor + semicircle on the free side
+    if (n.t) // bottom semicircle
+      return `M ${f(cx + r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy)} A ${f(r)} ${f(r)} 0 0 0 ${f(cx + r)} ${f(cy)} Z`;
+    if (n.r) // left semicircle
+      return `M ${f(cx + r)} ${f(cy - r)} L ${f(cx + r)} ${f(cy + r)} L ${f(cx)} ${f(cy + r)} A ${f(r)} ${f(r)} 0 0 0 ${f(cx)} ${f(cy - r)} Z`;
+    if (n.b) // top semicircle
+      return `M ${f(cx - r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy)} A ${f(r)} ${f(r)} 0 0 0 ${f(cx - r)} ${f(cy)} Z`;
+    // n.l: right semicircle
+    return `M ${f(cx - r)} ${f(cy + r)} L ${f(cx - r)} ${f(cy - r)} L ${f(cx)} ${f(cy - r)} A ${f(r)} ${f(r)} 0 0 1 ${f(cx)} ${f(cy + r)} Z`;
   },
 
   // 5. CLASSY (Clever mix: TL and BR are rounded, TR and BL are always sharp)
@@ -127,50 +137,27 @@ export const neighborShapes: Record<string, NeighborShapeDrawer> = {
     return path + " Z";
   },
 
-  // 6. CLASSY-ROUNDED
-  // Isolated → all 4 corners small-rounded
-  // Top-left free (!l && !t) → top-left gets a large quarter-circle, rest sharp
-  // Bottom-right free (!r && !b) → bottom-right gets a large quarter-circle, rest sharp
+  // 6. CLASSY-ROUNDED (Matches QRDot._drawClassyRounded exactly)
+  // Isolated → TL + BR rounded r=s/2 (same as classy)
+  // Top-left free (!l && !t) → large arc r=s through TL quadrant, rest sharp
+  // Bottom-right free (!r && !b) → large arc r=s through BR quadrant, rest sharp
   // Otherwise → square
   "classy-rounded": (x, y, n, s = 1) => {
     const cx = x + 0.5;
     const cy = y + 0.5;
     const r = 0.5 * s;
-    const rad = 0.25 * s;
-
     const neighborsCount = +n.l + +n.r + +n.t + +n.b;
 
-    // Isolated: all 4 corners small-rounded
-    if (neighborsCount === 0) {
-      return (
-        `M ${f(cx)} ${f(cy - r)}` +
-        ` L ${f(cx + r - rad)} ${f(cy - r)} A ${f(rad)} ${f(rad)} 0 0 1 ${f(cx + r)} ${f(cy - r + rad)} L ${f(cx + r)} ${f(cy)}` +
-        ` L ${f(cx + r)} ${f(cy + r - rad)} A ${f(rad)} ${f(rad)} 0 0 1 ${f(cx + r - rad)} ${f(cy + r)} L ${f(cx)} ${f(cy + r)}` +
-        ` L ${f(cx - r + rad)} ${f(cy + r)} A ${f(rad)} ${f(rad)} 0 0 1 ${f(cx - r)} ${f(cy + r - rad)} L ${f(cx - r)} ${f(cy)}` +
-        ` L ${f(cx - r)} ${f(cy - r + rad)} A ${f(rad)} ${f(rad)} 0 0 1 ${f(cx - r + rad)} ${f(cy - r)} L ${f(cx)} ${f(cy - r)} Z`
-      );
-    }
+    if (neighborsCount === 0) return neighborShapes.classy(x, y, n, s);
 
-    // Top-left corner free → large quarter-circle at top-left, rest sharp
-    if (!n.l && !n.t) {
-      return (
-        `M ${f(cx)} ${f(cy - r)}` +
-        ` L ${f(cx + r)} ${f(cy - r)} L ${f(cx + r)} ${f(cy + r)} L ${f(cx - r)} ${f(cy + r)} L ${f(cx - r)} ${f(cy)}` +
-        ` A ${f(r)} ${f(r)} 0 0 1 ${f(cx)} ${f(cy - r)} Z`
-      );
-    }
+    // TL free: BL → BR → TR → large arc r=s through TL → BL
+    if (!n.l && !n.t)
+      return `M ${f(cx - r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy - r)} A ${f(s)} ${f(s)} 0 0 0 ${f(cx - r)} ${f(cy + r)} Z`;
 
-    // Bottom-right corner free → large quarter-circle at bottom-right, rest sharp
-    if (!n.r && !n.b) {
-      return (
-        `M ${f(cx)} ${f(cy - r)}` +
-        ` L ${f(cx + r)} ${f(cy - r)} L ${f(cx + r)} ${f(cy)}` +
-        ` A ${f(r)} ${f(r)} 0 0 1 ${f(cx)} ${f(cy + r)}` +
-        ` L ${f(cx - r)} ${f(cy + r)} L ${f(cx - r)} ${f(cy - r)} L ${f(cx)} ${f(cy - r)} Z`
-      );
-    }
+    // BR free: TR → TL → BL → large arc r=s through BR → TR
+    if (!n.r && !n.b)
+      return `M ${f(cx + r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy + r)} A ${f(s)} ${f(s)} 0 0 0 ${f(cx + r)} ${f(cy - r)} Z`;
 
-    // Otherwise: square
-    return `M ${f(cx - r)} ${f(cy - r)} h ${s} v ${s} h -${s} Z`;
+    return neighborShapes.square(x, y, n, s);
   },
 };
