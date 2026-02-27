@@ -93,6 +93,14 @@ function generateGradientDef(
   // Radius (half the diagonal)
   const r = Math.sqrt(bw * bw + bh * bh) / 2;
 
+  if (grad.type === "radial") {
+    return `
+      <radialGradient id="${id}" gradientUnits="userSpaceOnUse" cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="${r.toFixed(2)}" fx="${cx.toFixed(2)}" fy="${cy.toFixed(2)}">
+        ${stops}
+      </radialGradient>
+    `;
+  }
+
   const x1 = (cx - r * Math.cos(angle)).toFixed(2);
   const y1 = (cy - r * Math.sin(angle)).toFixed(2);
   const x2 = (cx + r * Math.cos(angle)).toFixed(2);

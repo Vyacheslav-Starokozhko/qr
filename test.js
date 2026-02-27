@@ -756,10 +756,144 @@ const fullWLogo = path1 + " " + path2; // Just concatenating
     data: "https://qr-code-builder.vercel.app",
   });
 
+  const { svg: gradientQR } = await QRCodeGenerate({
+    width: 362,
+    height: 362,
+    images: [],
+    margin: 1,
+    dotsOptions: {
+      color: "#000000",
+      gradient: {
+        type: "linear",
+        rotation: 0,
+        colorStops: [
+          {
+            offset: "0",
+            color: "#000000",
+          },
+          {
+            offset: "1",
+            color: "#000000",
+          },
+        ],
+      },
+      shape: {
+        type: "figure",
+        path: "dots",
+      },
+      scale: 1,
+    },
+    backgroundOptions: {
+      gradient: {
+        type: "radial",
+        rotation: 0,
+        colorStops: [
+          {
+            color: "rgba(255,161,8,1)",
+            offset: "0.29",
+          },
+          {
+            color: "rgba(61,104,129,1)",
+            offset: "0.74",
+          },
+          {
+            color: "rgba(71,123,164,0.286)",
+            offset: "0.99",
+          },
+        ],
+      },
+    },
+    cornersSquareOptions: {
+      color: "#000000",
+      shape: {
+        type: "figure",
+        path: "extra-rounded",
+      },
+    },
+    cornersDotOptions: {
+      color: "#000000",
+      shape: {
+        type: "icon",
+        path: "star2",
+      },
+      isSingle: true,
+    },
+    data: "dsadasd",
+    borderRadius: 50,
+  });
+
+  const { svg: gradientQR2 } = await QRCodeGenerate({
+    width: 362,
+    height: 362,
+    images: [],
+    margin: 1,
+    dotsOptions: {
+      color: "#000000",
+      gradient: {
+        type: "linear",
+        rotation: 0,
+        colorStops: [
+          {
+            offset: "0",
+            color: "#000000",
+          },
+          {
+            offset: "1",
+            color: "#000000",
+          },
+        ],
+      },
+      shape: {
+        type: "figure",
+        path: "dots",
+      },
+      scale: 1,
+    },
+    backgroundOptions: {
+      gradient: {
+        type: "linear",
+        rotation: 90,
+        colorStops: [
+          {
+            color: "rgba(255,161,8,1)",
+            offset: "0.29",
+          },
+          {
+            color: "rgba(61,104,129,1)",
+            offset: "0.74",
+          },
+          {
+            color: "rgba(71,123,164,0.286)",
+            offset: "0.99",
+          },
+        ],
+      },
+    },
+    cornersSquareOptions: {
+      color: "#000000",
+      shape: {
+        type: "figure",
+        path: "extra-rounded",
+      },
+    },
+    cornersDotOptions: {
+      color: "#000000",
+      shape: {
+        type: "icon",
+        path: "star2",
+      },
+      isSingle: true,
+    },
+    data: "dsadsa",
+    borderRadius: 50,
+  });
+
   fs.writeFileSync("star2.svg", star2);
   fs.writeFileSync("star.svg", star);
   fs.writeFileSync("heart2.svg", heart2);
   fs.writeFileSync("heart.svg", heart);
   fs.writeFileSync("svgWithFrame.svg", svgWithFrame);
   fs.writeFileSync("heart3.svg", heart3);
+  fs.writeFileSync("gradientQR.svg", gradientQR);
+  fs.writeFileSync("gradientQR2.svg", gradientQR2);
 })();
