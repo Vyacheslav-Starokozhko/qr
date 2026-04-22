@@ -176,7 +176,7 @@ const fullWLogo = path1 + " " + path2; // Just concatenating
         // Provide your own SVG path data — same viewBox system as QR icons
         shape: {
           type: "custom-path",
-          d: customArrowPath,
+          path: customArrowPath,
           viewBox: "0 0 24 24",
         },
         color: "#0984e3",

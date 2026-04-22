@@ -628,7 +628,7 @@ function _renderBuiltinDecoration(
  * Shape types supported:
  *  - Built-in strings: "dot" | "ring" | "square" | "diamond" | "star" | "star4" | "cross" | "triangle"
  *  - { type: "icon"; path }  — icon from the built-in shapes registry
- *  - { type: "custom-path"; d; viewBox? } — custom SVG path data
+ *  - { type: "custom-path"; path; viewBox? } — custom SVG path data
  *  - { type: "image"; source } — any image URL or base64 data-URI
  */
 function generateDecorationsSvg(
@@ -986,13 +986,12 @@ export async function QRCodeGenerate(
           );
         } else if (zone === "cornerSquare") {
           if (partConfig.isSingle === false) {
-            // Per-module: every dark pixel gets the same isolated shape (no neighbor blending)
             const drawer =
               neighborShapes[shapePath] ?? neighborShapes["square"];
             pathsD.cornerSquare += drawer(
               x + effectiveMargin,
               y + effectiveMargin,
-              { t: false, r: false, b: false, l: false },
+              getNeighbors(x, y, matrix, matrixSize),
               scale,
             );
           } else {
@@ -1014,13 +1013,12 @@ export async function QRCodeGenerate(
         } else {
           // cornerDot
           if (partConfig.isSingle === false) {
-            // Per-module: every dark pixel gets the same isolated shape (no neighbor blending)
             const drawer =
               neighborShapes[shapePath] ?? neighborShapes["square"];
             pathsD.cornerDot += drawer(
               x + effectiveMargin,
               y + effectiveMargin,
-              { t: false, r: false, b: false, l: false },
+              getNeighbors(x, y, matrix, matrixSize),
               scale,
             );
           } else {
@@ -1045,7 +1043,7 @@ export async function QRCodeGenerate(
       // --- Icon / custom-icon rendering (<use> + <symbol>) ---
       let drawSize = 1;
 
-      if (zone === "cornerSquare" && partConfig.isSingle) {
+      if (zone === "cornerSquare" && partConfig.isSingle !== false) {
         if (!isOuterEyeStart(x, y, matrixSize)) continue;
         drawSize = 7;
         for (let dy = 0; dy < 7; dy++) {
@@ -1058,7 +1056,7 @@ export async function QRCodeGenerate(
         }
       }
 
-      if (zone === "cornerDot" && partConfig.isSingle) {
+      if (zone === "cornerDot" && partConfig.isSingle !== false) {
         if (!isInnerEyeStart(x, y, matrixSize)) continue;
         drawSize = 3;
         for (let dy = 0; dy < 3; dy++) {
