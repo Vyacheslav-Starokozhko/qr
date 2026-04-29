@@ -33,13 +33,15 @@ export const cornerDots: Record<string, CornerDotDrawer> = {
   dots: (x, y, s) => cornerDots["dot"](x, y, s), // Alias
 
   "extra-rounded": (x, y, s) => {
-    const t = s / 3; // 1 module
-    return solid(x, y, s, [1 * t, 1 * t, 1 * t, 1 * t]);
+    // Proportional to cornerSquare "extra-rounded" outer radius (2.5/7 of size)
+    const r = (s * 2.5) / 7;
+    return solid(x, y, s, [r, r, r, r]);
   },
 
   rounded: (x, y, s) => {
-    const t = s / 3;
-    return solid(x, y, s, [0.5 * t, 0.5 * t, 0.5 * t, 0.5 * t]); // Light rounding
+    // Proportional to cornerSquare "rounded" outer radius (1.5/7 of size)
+    const r = (s * 1.5) / 7;
+    return solid(x, y, s, [r, r, r, r]);
   },
 
   classy: (x, y, s) => {

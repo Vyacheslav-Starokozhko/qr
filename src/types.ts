@@ -98,8 +98,9 @@ export type CornerDotFigure =
   | "square"
   | "dot"
   | "dots"
-  | "classy"
+  | "extra-rounded"
   | "rounded"
+  | "classy"
   | "classy-rounded";
 
 export type QrShape = {
@@ -253,6 +254,96 @@ export type QrDecoration = {
   placement?: QrDecorationPlacement; // default "scatter"
 };
 
+/**
+ * Built-in shapes for the QR wrapper (clip mask applied to the whole QR).
+ * - "circle"   – inscribed circle (same as borderRadius: 100)
+ * - "square"   – plain square (no clip, useful with stroke only)
+ * - "triangle" – upward equilateral triangle
+ * - "diamond"  – square rotated 45°
+ * - "pentagon" – regular 5-sided polygon
+ * - "hexagon"  – regular 6-sided polygon (flat-top)
+ * - "octagon"  – regular 8-sided polygon
+ * - "star"     – 5-pointed star
+ * - "star4"    – 4-pointed star
+ */
+export type QrWrapperShape =
+  | "circle"
+  | "square"
+  | "triangle"
+  | "diamond"
+  | "pentagon"
+  | "hexagon"
+  | "octagon"
+  | "star"
+  | "star4";
+
+/**
+ * Clips the entire QR (background + dots) to a geometric shape and renders a
+ * filled border ring as a proper design element outside the clipped area.
+ *
+ * The ring is a filled donut between the clip boundary and the outer shape
+ * edge — not a simple SVG stroke. This means it can carry its own solid color
+ * or gradient independent of the QR content.
+ *
+ * @example Circle with green gradient ring (like the reference image)
+ * ```ts
+ * wrapper: {
+ *   shape: "circle",
+ *   strokeWidth: 40,
+ *   strokeGradient: {
+ *     type: "linear",
+ *     rotation: 135,
+ *     colorStops: [{ offset: "0%", color: "#166534" }, { offset: "100%", color: "#4ade80" }],
+ *   },
+ * }
+ * ```
+ *
+ * @example Hexagon with solid border
+ * ```ts
+ * wrapper: { shape: "hexagon", stroke: "#0ea5e9", strokeWidth: 20 }
+ * ```
+ *
+ * @example Custom SVG path (normalized to 0 0 100 100 space)
+ * ```ts
+ * wrapper: { path: "M50 0 L100 100 L0 100 Z", viewBox: "0 0 100 100", stroke: "#000", strokeWidth: 10 }
+ * ```
+ */
+export type QrWrapper = {
+  /** Predefined shape. Ignored when `path` is provided. Default: "circle". */
+  shape?: QrWrapperShape;
+  /**
+   * Custom SVG path data used instead of a predefined shape.
+   * The path should fill the coordinate space defined by `viewBox`.
+   */
+  path?: string;
+  /** SVG viewBox for the custom path (e.g. "0 0 100 100"). Default: "0 0 1 1". */
+  viewBox?: string;
+  /**
+   * Solid fill color for the border ring.
+   * Ignored when `strokeGradient` is set.
+   */
+  stroke?: string;
+  /**
+   * Gradient fill for the border ring. Takes priority over `stroke`.
+   */
+  strokeGradient?: Gradient;
+  /**
+   * Ring thickness in SVG output units (same unit as `width`/`height`).
+   * The QR content is clipped to a shape inset by this amount, and the ring
+   * fills the gap between the inset clip and the outer shape edge.
+   * Default: 0 (no ring).
+   */
+  strokeWidth?: number;
+  /**
+   * When `true` (default), the margin area around the QR matrix is filled with
+   * decorative dots that share the same shape, color and gradient as `dotsOptions`.
+   * This creates an integrated design element — the shape is not just a clip/frame
+   * on top of the QR code, but a fully filled pattern.
+   * Set to `false` to use the wrapper as a plain clip with no margin fill.
+   */
+  fillMargin?: boolean;
+};
+
 // The Main Config
 export type Options = {
   data?: string;
@@ -270,6 +361,12 @@ export type Options = {
   images?: QrImage[]; // Logos (Array)
   decorations?: QrDecoration[]; // Decorative shapes in the empty margin space around the QR
   frame?: QrFrame; // Decorative frame around the QR code
+  /**
+   * Clips the QR output to a geometric shape (circle, triangle, hexagon, …)
+   * and optionally draws a stroke border around it.
+   * When set, `borderRadius` is ignored for clipping purposes.
+   */
+  wrapper?: QrWrapper;
 
   qrOptions?: {
     typeNumber?: TypeNumber;
@@ -328,8 +425,9 @@ export enum ECornerDotFigure {
   SQUARE = "square",
   DOT = "dot",
   DOTS = "dots",
-  CLASSY = "classy",
+  EXTRA_ROUNDED = "extra-rounded",
   ROUNDED = "rounded",
+  CLASSY = "classy",
   CLASSY_ROUNDED = "classy-rounded",
 }
 

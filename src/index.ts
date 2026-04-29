@@ -13,6 +13,8 @@ import {
   QRScanState,
   QrDecoration,
   QrDecorationBuiltinShape,
+  QrWrapperShape,
+  QRMatrix,
 } from "./types";
 import { detectFrameInset } from "./frame-inset";
 import { exportQR, FileExtension, ExportOptions } from "./export";
@@ -796,18 +798,90 @@ function generateDecorationsSvg(
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Returns an SVG path string for the given wrapper shape, inscribed in a
+ * square of `size` × `size` units with an optional inward `inset`.
+ */
+function buildWrapperShapePath(
+  shape: QrWrapperShape,
+  size: number,
+  inset = 0,
+): string {
+  const cx = size / 2;
+  const cy = size / 2;
+  const r = size / 2 - inset;
+
+  const polygon = (sides: number, rotationDeg = 0): string => {
+    const pts: string[] = [];
+    for (let i = 0; i < sides; i++) {
+      const angle =
+        (i * 2 * Math.PI) / sides -
+        Math.PI / 2 +
+        (rotationDeg * Math.PI) / 180;
+      pts.push(
+        `${(cx + r * Math.cos(angle)).toFixed(3)} ${(cy + r * Math.sin(angle)).toFixed(3)}`,
+      );
+    }
+    return `M ${pts.join(" L ")} Z`;
+  };
+
+  const star = (points: number, innerRatio: number): string => {
+    const pts: string[] = [];
+    for (let i = 0; i < points * 2; i++) {
+      const angle = (i * Math.PI) / points - Math.PI / 2;
+      const ri = i % 2 === 0 ? r : r * innerRatio;
+      pts.push(
+        `${(cx + ri * Math.cos(angle)).toFixed(3)} ${(cy + ri * Math.sin(angle)).toFixed(3)}`,
+      );
+    }
+    return `M ${pts.join(" L ")} Z`;
+  };
+
+  switch (shape) {
+    case "circle":
+      return (
+        `M ${(cx - r).toFixed(3)} ${cy.toFixed(3)} ` +
+        `A ${r.toFixed(3)} ${r.toFixed(3)} 0 1 0 ${(cx + r).toFixed(3)} ${cy.toFixed(3)} ` +
+        `A ${r.toFixed(3)} ${r.toFixed(3)} 0 1 0 ${(cx - r).toFixed(3)} ${cy.toFixed(3)} Z`
+      );
+    case "square":
+      return `M ${(cx - r).toFixed(3)} ${(cy - r).toFixed(3)} H ${(cx + r).toFixed(3)} V ${(cy + r).toFixed(3)} H ${(cx - r).toFixed(3)} Z`;
+    case "triangle":
+      return polygon(3, 0);
+    case "diamond":
+      return polygon(4, 45);
+    case "pentagon":
+      return polygon(5, 0);
+    case "hexagon":
+      return polygon(6, 0);
+    case "octagon":
+      return polygon(8, 22.5);
+    case "star":
+      return star(5, 0.45);
+    case "star4":
+      return star(4, 0.38);
+    default:
+      return polygon(4, 0);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function QRCodeGenerate(
   options: Options,
+  _cachedMatrix?: QRMatrix,
 ): Promise<QRGenerateResult> {
   const config = {
     ...defaultOptions,
     ...options,
   };
-  const analyzer = new QRAnalyzer(
-    config.data ?? "",
-    config.qrOptions?.errorCorrectionLevel || "H",
-  );
-  const matrix = analyzer.getMatrix();
+  const matrix: QRMatrix = _cachedMatrix ?? (() => {
+    const analyzer = new QRAnalyzer(
+      config.data ?? "",
+      config.qrOptions?.errorCorrectionLevel || "H",
+    );
+    return analyzer.getMatrix();
+  })();
   const matrixSize = matrix.length;
   const margin = config.margin ?? 4;
 
@@ -828,8 +902,15 @@ export async function QRCodeGenerate(
     config.borderRadius != null
       ? Math.max(0, Math.min(100, config.borderRadius))
       : 0;
+  // Circle wrapper needs the same safe-margin guarantee as borderRadius: 100
+  const _brForMargin =
+    config.wrapper?.shape === "circle" || config.wrapper?.shape == null
+      ? config.wrapper
+        ? 100
+        : clampedBorderRadius
+      : clampedBorderRadius;
   const _c = 1 - 1 / Math.SQRT2; // ≈ 0.2929
-  const _k = (clampedBorderRadius / 100) * _c;
+  const _k = (_brForMargin / 100) * _c;
   const minSafeMargin =
     _k > 0 && _k < 1 ? (_k * matrixSize) / (2 * (1 - _k)) : 0;
   const effectiveMargin = Math.max(margin, minSafeMargin);
@@ -1080,6 +1161,47 @@ export async function QRCodeGenerate(
     }
   }
 
+  // --- 2b. MARGIN FILL DOTS ---
+  // When a wrapper is active and fillMargin !== false, flood the margin area
+  // (grid positions outside the QR matrix but inside fullSize) with dots that
+  // share the same shape, color and gradient as dotsOptions.
+  // These dots are appended to pathsD.dots / uses.dots so they participate in
+  // the same gradient mask as the QR data dots.
+  if (config.wrapper && config.wrapper.fillMargin !== false) {
+    const dotsShapeType = config.dotsOptions.shape?.type ?? "figure";
+    const dotsShapePath = (config.dotsOptions.shape?.path ?? "square") as string;
+    const dotsScale = config.dotsOptions.scale ?? 1;
+    const noNeighbors: Neighbors = { t: false, r: false, b: false, l: false };
+
+    // Extend grid by one extra column/row on each side to ensure full coverage
+    // near the edges (fractional effectiveMargin values).
+    const ext = Math.ceil(effectiveMargin) + 1;
+
+    for (let my = -ext; my < matrixSize + ext; my++) {
+      for (let mx = -ext; mx < matrixSize + ext; mx++) {
+        // Skip positions that belong to the QR matrix itself
+        if (mx >= 0 && mx < matrixSize && my >= 0 && my < matrixSize) continue;
+
+        // Pixel-space top-left corner of this module
+        const px = mx + effectiveMargin;
+        const py = my + effectiveMargin;
+
+        // Reject positions fully outside the SVG canvas
+        if (px >= fullSize || py >= fullSize || px + 1 <= 0 || py + 1 <= 0) continue;
+
+        if (dotsShapeType === "icon" || dotsShapeType === "custom-icon") {
+          const scaled = dotsScale;
+          const offX = (1 - scaled) / 2;
+          const offY = (1 - scaled) / 2;
+          uses.dots += `<use href="#icon-dots" x="${px + offX}" y="${py + offY}" width="${scaled}" height="${scaled}" />`;
+        } else {
+          const drawer = neighborShapes[dotsShapePath] ?? neighborShapes["square"];
+          pathsD.dots += drawer(px, py, noNeighbors, dotsScale);
+        }
+      }
+    }
+  }
+
   // --- 3. FINAL ASSEMBLY ---
 
   // Dots Layer (Global Gradient) — combines icon <use> elements and figure <path> data
@@ -1123,7 +1245,7 @@ export async function QRCodeGenerate(
     const maskDef = `
         <mask id="${maskId}">
             <rect width="${fullSize}" height="${fullSize}" fill="black" />
-            <g fill="white" shape-rendering="crispEdges">${maskContent}</g>
+            <g fill="white">${maskContent}</g>
         </mask>
       `;
 
@@ -1154,20 +1276,98 @@ export async function QRCodeGenerate(
     imagesSvg += `<image href="${img.source}" x="${imgX}" y="${imgY}" width="${img.width}" height="${img.height}" preserveAspectRatio="${par}"${opacityAttr} />`;
   });
 
-  // Convert borderRadius from percentage (0–100) to SVG viewBox units.
-  // 100% → rx = fullSize/2, which produces a perfect circle on a square QR.
-  // effectiveMargin already guarantees corner modules are inside the arc, so
-  // no additional scale transform is needed here.
-  const borderRadius = (clampedBorderRadius / 100) * (fullSize / 2);
-  const rxAttr = borderRadius > 0 ? `rx="${borderRadius.toFixed(3)}"` : "";
-  const clipPathDef =
-    borderRadius > 0
-      ? `<clipPath id="qr-clip"><rect width="${fullSize}" height="${fullSize}" ${rxAttr} /></clipPath>`
-      : "";
-  const clipAttr = borderRadius > 0 ? `clip-path="url(#qr-clip)"` : "";
+  // ── Clip path + wrapper ring setup ────────────────────────────────────────
+  // wrapper takes priority over borderRadius.
+  //
+  // When strokeWidth > 0 the ring is a FILLED DONUT rendered as a separate
+  // design layer outside the clipped QR content:
+  //   • QR content is clipped to the shape inset by strokeWidth
+  //   • A mask punches the inner shape out of the outer shape → donut ring
+  //   • The ring is filled with stroke/strokeGradient color
+  //
+  // This ensures the ring is a proper design element, not a simple line.
+  let clipPathDef = "";
+  let clipAttr = "";
+  let bgRxAttr = ""; // only used for background rect in legacy borderRadius mode
+  let wrapperRingSvg = ""; // donut ring rendered outside the clipped group
+
+  const wrapper = config.wrapper;
+  if (wrapper) {
+    const sw = wrapper.strokeWidth ?? 0;
+    const hasRing = sw > 0 && (wrapper.stroke != null || wrapper.strokeGradient != null);
+
+    // ── Build path strings for outer and inner (clip) boundaries ─────────────
+    let outerD: string;
+    let innerD: string;
+
+    if (wrapper.path) {
+      // Custom path: scale from user viewBox coordinate space
+      const vbParts = (wrapper.viewBox ?? "0 0 1 1").split(/[\s,]+/).map(Number);
+      const vbW = vbParts[2] ?? 1;
+      const vbH = vbParts[3] ?? 1;
+      // Outer: scale to fill fullSize
+      const sxO = (fullSize / vbW).toFixed(6);
+      const syO = (fullSize / vbH).toFixed(6);
+      outerD = `<path d="${wrapper.path}" transform="scale(${sxO},${syO})" />`;
+      if (hasRing) {
+        // Inner: scale to fill (fullSize - 2*sw), translated by sw
+        const is = fullSize - 2 * sw;
+        const sxI = (is / vbW).toFixed(6);
+        const syI = (is / vbH).toFixed(6);
+        innerD = `<path d="${wrapper.path}" transform="translate(${sw},${sw}) scale(${sxI},${syI})" />`;
+      } else {
+        innerD = outerD;
+      }
+    } else {
+      const shape = wrapper.shape ?? "circle";
+      outerD = `<path d="${buildWrapperShapePath(shape, fullSize, 0)}" />`;
+      innerD = hasRing
+        ? `<path d="${buildWrapperShapePath(shape, fullSize, sw)}" />`
+        : outerD;
+    }
+
+    // Clip uses the inner (inset) boundary so ring area is outside the clip
+    clipPathDef = `<clipPath id="qr-clip">${innerD}</clipPath>`;
+    clipAttr = `clip-path="url(#qr-clip)"`;
+
+    // ── Ring: filled donut via SVG mask ───────────────────────────────────────
+    if (hasRing) {
+      // Gradient or solid fill for the ring
+      let ringFill: string;
+      if (wrapper.strokeGradient) {
+        defsString += generateGradientDef(
+          "grad-wrapper-ring",
+          wrapper.strokeGradient,
+          0,
+          0,
+          fullSize,
+          fullSize,
+        );
+        ringFill = "url(#grad-wrapper-ring)";
+      } else {
+        ringFill = wrapper.stroke!;
+      }
+
+      // Mask: outer shape is white (visible area), inner shape is black (hole)
+      defsString += `
+        <mask id="wrapper-ring-mask">
+          ${outerD.replace("<path ", `<path fill="white" `)}
+          ${innerD.replace("<path ", `<path fill="black" `)}
+        </mask>`;
+
+      wrapperRingSvg = `<rect width="${fullSize}" height="${fullSize}" fill="${ringFill}" mask="url(#wrapper-ring-mask)" />`;
+    }
+  } else {
+    // Legacy: borderRadius → rounded-rect clip
+    const borderRadius = (clampedBorderRadius / 100) * (fullSize / 2);
+    if (borderRadius > 0) {
+      bgRxAttr = `rx="${borderRadius.toFixed(3)}"`;
+      clipPathDef = `<clipPath id="qr-clip"><rect width="${fullSize}" height="${fullSize}" ${bgRxAttr} /></clipPath>`;
+      clipAttr = `clip-path="url(#qr-clip)"`;
+    }
+  }
 
   // Decorations: shapes scattered in the empty margin space outside the QR matrix.
-  // Rendered outside the clip group so they are visible in rounded-corner areas too.
   const decorationsSvg = generateDecorationsSvg(
     config.decorations ?? [],
     effectiveMargin,
@@ -1175,20 +1375,19 @@ export async function QRCodeGenerate(
     fullSize,
   );
 
-  // The inner QR SVG content (background + decorations + dots + eyes + logos)
-  // Decorations are placed inside the clip group so they are always confined
-  // to the QR background zone (hidden outside the rounded-corner clip boundary).
+  // QR content: clipped group + ring layer on top
   const qrContent = `
     <defs>${defsString}${clipPathDef}</defs>
     <g ${clipAttr}>
-      <rect width="${fullSize}" height="${fullSize}" fill="${getBackgroundFill()}" ${rxAttr}/>
+      <rect width="${fullSize}" height="${fullSize}" fill="${getBackgroundFill()}" ${bgRxAttr}/>
       ${config.backgroundOptions?.image ? `<image href="${config.backgroundOptions.image}" width="${fullSize}" height="${fullSize}" preserveAspectRatio="none" />` : ""}
       ${decorationsSvg}
       ${generateDotsLayer()}
       ${generateEyeLayer("cornerSquare", "grad-sq", config.cornersSquareOptions)}
       ${generateEyeLayer("cornerDot", "grad-dot", config.cornersDotOptions)}
       ${imagesSvg}
-    </g>`;
+    </g>
+    ${wrapperRingSvg}`;
 
   // --- Frame label renderer ---
   /**
@@ -1654,4 +1853,110 @@ export function getQRBounds(
       maxY: Math.max(0, matrixSize - imageHeight),
     }),
   };
+}
+
+// --- QRCodeCreate: stateful instance with update() and matrix caching ---
+
+/** Deep-merge QR options: nested option objects are merged rather than replaced. */
+function mergeQROptions(base: Options, updates: Partial<Options>): Options {
+  const result: Options = { ...base };
+  for (const _k in updates) {
+    const k = _k as keyof Options;
+    const bv = base[k];
+    const uv = updates[k];
+    if (uv === undefined) continue;
+    if (
+      uv !== null &&
+      typeof uv === "object" &&
+      !Array.isArray(uv) &&
+      bv !== null &&
+      typeof bv === "object" &&
+      !Array.isArray(bv)
+    ) {
+      (result as Record<string, unknown>)[k] = { ...(bv as object), ...(uv as object) };
+    } else {
+      (result as Record<string, unknown>)[k] = uv;
+    }
+  }
+  return result;
+}
+
+/**
+ * A live QR code handle returned by {@link createQRCode}.
+ * Call {@link QRCodeHandle.update} to re-render with new options — the QR
+ * matrix is cached and reused whenever `data` and `qrOptions` are unchanged,
+ * so style-only updates skip the expensive matrix generation step.
+ */
+export interface QRCodeHandle extends QRGenerateResult {
+  /**
+   * Merge `partialOptions` into the current options and re-render.
+   * Nested option objects (dotsOptions, backgroundOptions, …) are merged at
+   * one level deep, so you can change a single sub-field without re-specifying
+   * the whole object.
+   * Returns the same handle (mutated in-place) for easy chaining.
+   */
+  update(partialOptions: Partial<Options>): Promise<QRCodeHandle>;
+}
+
+/**
+ * Create a QR code instance that supports incremental updates.
+ *
+ * Unlike {@link QRCodeGenerate}, the returned handle caches the QR matrix and
+ * only rebuilds it when `data` or `qrOptions.errorCorrectionLevel` changes.
+ * Style-only updates (colors, shapes, images, …) skip matrix generation and
+ * re-render the SVG directly, which is significantly faster for interactive UIs.
+ *
+ * @example
+ * ```ts
+ * const qr = await createQRCode({ data: "https://example.com", width: 400, height: 400 });
+ * document.body.innerHTML = qr.svg;
+ *
+ * // Change only the dot color — matrix is reused
+ * await qr.update({ dotsOptions: { color: "#e11d48" } });
+ * document.body.innerHTML = qr.svg;
+ * ```
+ */
+export async function createQRCode(initialOptions: Options): Promise<QRCodeHandle> {
+  let opts: Options = { ...initialOptions };
+  let cachedMatrix: QRMatrix | null = null;
+  let cachedData = "";
+  let cachedEcl = "";
+
+  async function build(): Promise<QRGenerateResult> {
+    const merged = { ...defaultOptions, ...opts };
+    const data = merged.data ?? "";
+    const ecl = merged.qrOptions?.errorCorrectionLevel ?? "H";
+
+    if (!cachedMatrix || data !== cachedData || ecl !== cachedEcl) {
+      const analyzer = new QRAnalyzer(data, ecl);
+      cachedMatrix = analyzer.getMatrix();
+      cachedData = data;
+      cachedEcl = ecl;
+    }
+
+    return QRCodeGenerate(opts, cachedMatrix);
+  }
+
+  const initial = await build();
+
+  const handle: QRCodeHandle = {
+    svg: initial.svg,
+    canvas: initial.canvas,
+    matrixSize: initial.matrixSize,
+    eyeZones: initial.eyeZones,
+    getMaxPos: initial.getMaxPos,
+
+    async update(partialOptions: Partial<Options>): Promise<QRCodeHandle> {
+      opts = mergeQROptions(opts, partialOptions);
+      const result = await build();
+      handle.svg = result.svg;
+      handle.canvas = result.canvas;
+      handle.matrixSize = result.matrixSize;
+      handle.eyeZones = result.eyeZones;
+      handle.getMaxPos = result.getMaxPos;
+      return handle;
+    },
+  };
+
+  return handle;
 }
