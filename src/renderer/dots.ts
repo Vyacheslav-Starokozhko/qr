@@ -85,7 +85,11 @@ export const neighborShapes: Record<string, NeighborShapeDrawer> = {
     const count = +n.l + +n.r + +n.t + +n.b;
 
     if (count === 0) return neighborShapes.dots(x, y, n, s);
-    if (count > 2 || (n.l && n.r) || (n.t && n.b)) return neighborShapes.square(x, y, n, s);
+    if (count > 2 || (n.l && n.r) || (n.t && n.b)) {
+      // Rounded rect with gentle corners instead of hard square
+      const cr = r * 0.18;
+      return `M ${f(cx - r + cr)} ${f(cy - r)} H ${f(cx + r - cr)} A ${f(cr)} ${f(cr)} 0 0 1 ${f(cx + r)} ${f(cy - r + cr)} V ${f(cy + r - cr)} A ${f(cr)} ${f(cr)} 0 0 1 ${f(cx + r - cr)} ${f(cy + r)} H ${f(cx - r + cr)} A ${f(cr)} ${f(cr)} 0 0 1 ${f(cx - r)} ${f(cy + r - cr)} V ${f(cy - r + cr)} A ${f(cr)} ${f(cr)} 0 0 1 ${f(cx - r + cr)} ${f(cy - r)} Z`;
+    }
 
     if (count === 2) {
       // 3 sharp sides + quarter-circle (r = s/2) at the one free corner

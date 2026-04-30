@@ -867,6 +867,21 @@ function buildWrapperShapePath(
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+let _qrIdCtr = 0;
+
+function prefixSvgIds(svg: string, prefix: string): string {
+  const ids = new Set<string>();
+  svg.replace(/\bid="([^"]+)"/g, (_, id) => { ids.add(id); return _; });
+  if (!ids.size) return svg;
+  svg = svg.replace(/\bid="([^"]+)"/g, (_, id) => `id="${prefix}${id}"`);
+  ids.forEach(id => {
+    const esc = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    svg = svg.replace(new RegExp(`url\\(#${esc}\\)`, "g"), `url(#${prefix}${id})`);
+    svg = svg.replace(new RegExp(`href="#${esc}"`, "g"), `href="#${prefix}${id}"`);
+  });
+  return svg;
+}
+
 export async function QRCodeGenerate(
   options: Options,
   _cachedMatrix?: QRMatrix,
@@ -930,9 +945,11 @@ export async function QRCodeGenerate(
     eyeZones: _eyeZones,
     getMaxPos: _getMaxPos,
   };
+  const _uid = ++_qrIdCtr;
   const finalizeResult = async (svg: string): Promise<QRGenerateResult> => {
-    const canvas = await svgToCanvas(svg, w, h);
-    return { ...base, svg, canvas };
+    const prefixed = prefixSvgIds(svg, `qr${_uid}-`);
+    const canvas = await svgToCanvas(prefixed, w, h);
+    return { ...base, svg: prefixed, canvas };
   };
 
   const fullSize = matrixSize + effectiveMargin * 2;
@@ -1066,7 +1083,7 @@ export async function QRCodeGenerate(
             scale,
           );
         } else if (zone === "cornerSquare") {
-          if (partConfig.isSingle === false) {
+          if (partConfig.isSingle === false || shapePath === "dots") {
             const drawer =
               neighborShapes[shapePath] ?? neighborShapes["square"];
             pathsD.cornerSquare += drawer(
@@ -1093,7 +1110,7 @@ export async function QRCodeGenerate(
           }
         } else {
           // cornerDot
-          if (partConfig.isSingle === false) {
+          if (partConfig.isSingle === false || shapePath === "dots") {
             const drawer =
               neighborShapes[shapePath] ?? neighborShapes["square"];
             pathsD.cornerDot += drawer(
