@@ -37,6 +37,38 @@ const fullWLogo = path1 + " " + path2; // Just concatenating
     height: 500,
     backgroundOptions: { color: "#ffffff" },
     dotsOptions: {
+      shape: { type: "figure", path: "rounded" },
+      color: "#000000",
+    },
+    cornersSquareOptions: {
+      shape: { type: "icon", path: "outer-eye-star" },
+      color: "#000000",
+      isSingle: true,
+    },
+    cornersDotOptions: {
+      shape: { type: "icon", path: "star2" },
+      color: "#000000",
+      isSingle: true,
+    },
+    decorations: [
+      {
+        shape: "dot",
+        color: "#e74c3c",
+        size: 0.7,
+        opacity: 0.9,
+        placement: "scatter",
+        seed: 1,
+      },
+    ],
+  });
+
+  const { svg: decDots2 } = await QRCodeGenerate({
+    data: "https://example.com",
+    margin: 4,
+    width: 500,
+    height: 500,
+    backgroundOptions: { color: "#ffffff" },
+    dotsOptions: {
       shape: { type: "figure", path: "extra-rounded" },
       color: "#000000",
     },
@@ -63,4 +95,5 @@ const fullWLogo = path1 + " " + path2; // Just concatenating
   });
 
   fs.writeFileSync("decDots.svg", decDots);
+  fs.writeFileSync("decDots2.svg", decDots2);
 })();

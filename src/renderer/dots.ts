@@ -44,11 +44,14 @@ export const neighborShapes: Record<string, NeighborShapeDrawer> = {
 
     // 2 adjacent neighbors: large arc r=s filling the entire free corner quadrant
     if (count === 2 && !(n.l && n.r) && !(n.t && n.b)) {
-      if (n.l && n.t) // free: BR
+      if (n.l && n.t)
+        // free: BR
         return `M ${f(cx + r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy + r)} A ${f(s)} ${f(s)} 0 0 0 ${f(cx + r)} ${f(cy - r)} Z`;
-      if (n.t && n.r) // free: BL
+      if (n.t && n.r)
+        // free: BL
         return `M ${f(cx + r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy - r)} A ${f(s)} ${f(s)} 0 0 0 ${f(cx + r)} ${f(cy + r)} Z`;
-      if (n.r && n.b) // free: TL
+      if (n.r && n.b)
+        // free: TL
         return `M ${f(cx - r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy - r)} A ${f(s)} ${f(s)} 0 0 0 ${f(cx - r)} ${f(cy + r)} Z`;
       // n.l && n.b: free: TR
       return `M ${f(cx - r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy + r)} A ${f(s)} ${f(s)} 0 0 0 ${f(cx - r)} ${f(cy - r)} Z`;
@@ -84,33 +87,41 @@ export const neighborShapes: Record<string, NeighborShapeDrawer> = {
     const r = 0.5 * s;
     const count = +n.l + +n.r + +n.t + +n.b;
 
+    // 0 neighbors -> Matches `_basicDot`
     if (count === 0) return neighborShapes.dots(x, y, n, s);
+
+    // > 2 neighbors or opposite neighbors -> Matches `_basicSquare`
     if (count > 2 || (n.l && n.r) || (n.t && n.b)) {
-      // Rounded rect with gentle corners instead of hard square
-      const cr = r * 0.18;
-      return `M ${f(cx - r + cr)} ${f(cy - r)} H ${f(cx + r - cr)} A ${f(cr)} ${f(cr)} 0 0 1 ${f(cx + r)} ${f(cy - r + cr)} V ${f(cy + r - cr)} A ${f(cr)} ${f(cr)} 0 0 1 ${f(cx + r - cr)} ${f(cy + r)} H ${f(cx - r + cr)} A ${f(cr)} ${f(cr)} 0 0 1 ${f(cx - r)} ${f(cy + r - cr)} V ${f(cy - r + cr)} A ${f(cr)} ${f(cr)} 0 0 1 ${f(cx - r + cr)} ${f(cy - r)} Z`;
+      // Hard square to match the library, replacing the gentle rounded rect
+      return `M ${f(cx - r)} ${f(cy - r)} H ${f(cx + r)} V ${f(cy + r)} H ${f(cx - r)} Z`;
     }
 
+    // 2 adjacent neighbors -> Matches `_basicCornerRounded` with rotations
     if (count === 2) {
-      // 3 sharp sides + quarter-circle (r = s/2) at the one free corner
-      if (n.l && n.t) // free: BR
-        return `M ${f(cx + r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy + r)} L ${f(cx)} ${f(cy + r)} A ${f(r)} ${f(r)} 0 0 1 ${f(cx + r)} ${f(cy)} Z`;
-      if (n.t && n.r) // free: BL
+      if (n.l && n.t)
+        // Matches rotation Math.PI / 2
+        return `M ${f(cx + r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy + r)} L ${f(cx)} ${f(cy + r)} A ${f(r)} ${f(r)} 0 0 0 ${f(cx + r)} ${f(cy)} Z`;
+      if (n.t && n.r)
+        // Matches rotation Math.PI
         return `M ${f(cx + r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy)} A ${f(r)} ${f(r)} 0 0 0 ${f(cx)} ${f(cy + r)} Z`;
-      if (n.r && n.b) // free: TL
-        return `M ${f(cx - r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy - r)} L ${f(cx)} ${f(cy - r)} A ${f(r)} ${f(r)} 0 0 1 ${f(cx - r)} ${f(cy)} Z`;
-      // n.l && n.b: free: TR
+      if (n.r && n.b)
+        // Matches rotation -Math.PI / 2
+        return `M ${f(cx - r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy - r)} L ${f(cx)} ${f(cy - r)} A ${f(r)} ${f(r)} 0 0 0 ${f(cx - r)} ${f(cy)} Z`;
+      // n.l && n.b: Matches rotation 0
       return `M ${f(cx - r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy)} A ${f(r)} ${f(r)} 0 0 0 ${f(cx)} ${f(cy - r)} Z`;
     }
 
-    // count === 1: flat side facing neighbor + semicircle on the free side
-    if (n.t) // bottom semicircle
-      return `M ${f(cx + r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy - r)} L ${f(cx - r)} ${f(cy)} A ${f(r)} ${f(r)} 0 0 0 ${f(cx + r)} ${f(cy)} Z`;
-    if (n.r) // left semicircle
-      return `M ${f(cx + r)} ${f(cy - r)} L ${f(cx + r)} ${f(cy + r)} L ${f(cx)} ${f(cy + r)} A ${f(r)} ${f(r)} 0 0 0 ${f(cx)} ${f(cy - r)} Z`;
-    if (n.b) // top semicircle
+    // 1 neighbor -> Matches `_basicSideRounded` with rotations
+    if (n.t)
+      // Matches rotation Math.PI / 2: flat top, south semicircle (sweep=1 CW)
+      return `M ${f(cx - r)} ${f(cy - r)} L ${f(cx + r)} ${f(cy - r)} L ${f(cx + r)} ${f(cy)} A ${f(r)} ${f(r)} 0 0 1 ${f(cx - r)} ${f(cy)} Z`;
+    if (n.r)
+      // Matches rotation Math.PI: flat right, west semicircle (sweep=1 CW)
+      return `M ${f(cx + r)} ${f(cy - r)} L ${f(cx + r)} ${f(cy + r)} L ${f(cx)} ${f(cy + r)} A ${f(r)} ${f(r)} 0 0 1 ${f(cx)} ${f(cy - r)} Z`;
+    if (n.b)
+      // Matches rotation -Math.PI / 2
       return `M ${f(cx - r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy + r)} L ${f(cx + r)} ${f(cy)} A ${f(r)} ${f(r)} 0 0 0 ${f(cx - r)} ${f(cy)} Z`;
-    // n.l: right semicircle
+    // n.l: Matches rotation 0
     return `M ${f(cx - r)} ${f(cy + r)} L ${f(cx - r)} ${f(cy - r)} L ${f(cx)} ${f(cy - r)} A ${f(r)} ${f(r)} 0 0 1 ${f(cx)} ${f(cy + r)} Z`;
   },
 
