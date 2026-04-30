@@ -37,16 +37,16 @@ const fullWLogo = path1 + " " + path2; // Just concatenating
     height: 500,
     backgroundOptions: { color: "#ffffff" },
     dotsOptions: {
-      shape: { type: "figure", path: "dots" },
+      shape: { type: "figure", path: "extra-rounded" },
       color: "#000000",
     },
     cornersSquareOptions: {
-      shape: { type: "icon", path: "star2" },
+      shape: { type: "icon", path: "outer-eye-star" },
       color: "#000000",
       isSingle: true,
     },
     cornersDotOptions: {
-      shape: { type: "icon", path: "dots" },
+      shape: { type: "icon", path: "star2" },
       color: "#000000",
       isSingle: true,
     },
