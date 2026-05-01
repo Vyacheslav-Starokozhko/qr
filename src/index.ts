@@ -524,22 +524,16 @@ export async function scanQR(
 // --- Main Function ---
 
 /**
- * Slider/input maximums derived from the generated QR code.
- * Re-read these after every `update()` call — they change with the matrix size.
+ * Static slider/input maximums for this QR code.
+ * Recomputed only when `data` or `errorCorrectionLevel` changes.
  */
 export interface QRMaxValues {
-  /** Max image width/height in modules (ECL-aware). */
+  /** Max image width/height in modules. */
   imageSize: number;
   /** Max QR border margin in modules. */
   frameMargin: number;
-  /**
-   * Max safe excludeDots margin for the given image size (integer module step).
-   * Wire this to your margin slider's `max` attribute, updated whenever the
-   * image-size slider changes.
-   * @example
-   * marginInput.max = String(maxValues.getImageMargin(+imageSizeInput.value));
-   */
-  getImageMargin: (imageSize: number) => number;
+  /** Max excludeDots margin in modules. */
+  imageMargin: number;
 }
 
 interface QRGenerateResultBase {
@@ -1003,8 +997,7 @@ export async function QRCodeGenerate(
   const _maxValues: QRMaxValues = {
     imageSize: _maxExclusionSide,
     frameMargin: matrixSize,
-    getImageMargin: (imgSize: number) =>
-      Math.max(0, Math.floor((_maxExclusionSide - Math.max(0, imgSize)) / 2)),
+    imageMargin: Math.floor(_maxExclusionSide / 2),
   };
   const base: QRGenerateResultBase = {
     matrixSize,
@@ -1945,8 +1938,7 @@ export function getQRBounds(
     maxValues: {
       imageSize: _maxExclusionSide,
       frameMargin: matrixSize,
-      getImageMargin: (imgSize: number) =>
-        Math.max(0, Math.floor((_maxExclusionSide - Math.max(0, imgSize)) / 2)),
+      imageMargin: Math.floor(_maxExclusionSide / 2),
     },
     getMaxPos: (imageWidth: number, imageHeight: number) => ({
       maxX: Math.max(0, matrixSize - imageWidth),
