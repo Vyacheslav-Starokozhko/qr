@@ -398,18 +398,18 @@ function resolveImagePositions(
 
   return images.map((img, globalIdx) => {
     const pos = img.position;
-    const {
-      source,
-      width,
-      height,
-      excludeDots,
-      opacity,
-      preserveAspectRatio,
-    } = img;
+    const { source, excludeDots, opacity, preserveAspectRatio } = img;
+
+    // Convert 0-100 percentage inputs to module units
+    const width  = (img.width  / 100) * matrixSize;
+    const height = (img.height / 100) * matrixSize;
+    const imgMarginModules = ((img.margin ?? 0) / 100) * matrixSize;
+
     const { excW, excH, excMargin } =
       excludeDots && img.margin != null
-        ? clampImageExclusion(width, height, img.margin, matrixSize, ecl)
-        : { excW: width, excH: height, excMargin: img.margin ?? 0 };
+        ? clampImageExclusion(width, height, imgMarginModules, matrixSize, ecl)
+        : { excW: width, excH: height, excMargin: imgMarginModules };
+
     const base = {
       source,
       width,
@@ -424,8 +424,11 @@ function resolveImagePositions(
     };
 
     if (pos?.type === "custom") {
-      const resolved: ResolvedQrImage = { ...base, x: pos.x, y: pos.y };
-      return overlapsEye(pos.x, pos.y, width, height, matrixSize)
+      // custom x/y are also percentages → convert to modules
+      const xm = (pos.x / 100) * matrixSize;
+      const ym = (pos.y / 100) * matrixSize;
+      const resolved: ResolvedQrImage = { ...base, x: xm, y: ym };
+      return overlapsEye(xm, ym, width, height, matrixSize)
         ? clampImageFromEyes(resolved, globalIdx, matrixSize)
         : resolved;
     }
@@ -963,7 +966,8 @@ export async function QRCodeGenerate(
     return analyzer.getMatrix();
   })();
   const matrixSize = matrix.length;
-  const margin = config.margin ?? 4;
+  // margin is now 0-100 (% of matrixSize). Convert to module units here.
+  const margin = ((config.margin ?? 10) / 100) * matrixSize;
 
   // --- Effective margin: ensure corner modules stay inside the rounded clip ---
   // When borderRadius > 0, analytically compute the minimum margin so that the
@@ -1001,17 +1005,19 @@ export async function QRCodeGenerate(
     width: 7,
     height: 7,
   }));
-  const _getMaxPos = (iw: number, ih: number) => ({
-    maxX: Math.max(0, matrixSize - iw),
-    maxY: Math.max(0, matrixSize - ih),
+  // getMaxPos: takes percentage inputs, returns percentage max position
+  const _getMaxPos = (iwPct: number, ihPct: number) => ({
+    maxX: Math.max(0, 100 - iwPct),
+    maxY: Math.max(0, 100 - ihPct),
   });
   const _ecl = config.qrOptions?.errorCorrectionLevel || "H";
   const _eclFraction = ECL_SAFE_FRACTION[_ecl] ?? 0.30;
-  const _maxExclusionSide = Math.floor(matrixSize * Math.sqrt(_eclFraction));
+  // maxValues: fixed 0-100 percentages — same for any QR size, only ECL changes them
+  const _imageSizeMax = Math.floor(Math.sqrt(_eclFraction) * 100); // H=54 Q=50 M=38 L=26
   const _maxValues: QRMaxValues = {
-    imageSize: _maxExclusionSide,
-    frameMargin: matrixSize,
-    imageMargin: Math.floor(_maxExclusionSide / 2),
+    imageSize:   _imageSizeMax,
+    imageMargin: Math.floor(_imageSizeMax / 2),
+    frameMargin: 50,
   };
   const base: QRGenerateResultBase = {
     matrixSize,
@@ -1951,19 +1957,19 @@ export function getQRBounds(
   }));
 
   const _eclFraction = ECL_SAFE_FRACTION[errorCorrectionLevel] ?? 0.30;
-  const _maxExclusionSide = Math.floor(matrixSize * Math.sqrt(_eclFraction));
+  const _imageSizeMax = Math.floor(Math.sqrt(_eclFraction) * 100);
 
   return {
     matrixSize,
     eyeZones,
     maxValues: {
-      imageSize: _maxExclusionSide,
-      frameMargin: matrixSize,
-      imageMargin: Math.floor(_maxExclusionSide / 2),
+      imageSize:   _imageSizeMax,
+      imageMargin: Math.floor(_imageSizeMax / 2),
+      frameMargin: 50,
     },
-    getMaxPos: (imageWidth: number, imageHeight: number) => ({
-      maxX: Math.max(0, matrixSize - imageWidth),
-      maxY: Math.max(0, matrixSize - imageHeight),
+    getMaxPos: (iwPct: number, ihPct: number) => ({
+      maxX: Math.max(0, 100 - iwPct),
+      maxY: Math.max(0, 100 - ihPct),
     }),
   };
 }
