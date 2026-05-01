@@ -151,6 +151,39 @@ function createSymbol(id: string, part: QrPartOptions): string {
 /** Internal image type with resolved flat x/y coordinates (in matrix modules). */
 type ResolvedQrImage = Omit<QrImage, "position"> & { x: number; y: number };
 
+/**
+ * Max fraction of total QR area that can be safely obscured per error-correction level.
+ * Used to derive per-QR maxExclusionSide so small and large QR codes get different limits.
+ */
+const ECL_SAFE_FRACTION: Record<string, number> = {
+  L: 0.07,
+  M: 0.15,
+  Q: 0.25,
+  H: 0.30,
+};
+
+/**
+ * Clamp an image's excludeDots margin so the exclusion zone (image + 2×margin) never
+ * exceeds the ECL-safe area. Uses step-1 (integer-module) resolution for the max so
+ * small QR codes get tighter limits than large ones.
+ */
+function clampImageExclusion(
+  width: number,
+  height: number,
+  margin: number,
+  matrixSize: number,
+  ecl: string,
+): number {
+  const fraction = ECL_SAFE_FRACTION[ecl] ?? 0.30;
+  // Integer-module ceiling: largest square that fits within the safe area
+  const maxExclusionSide = Math.floor(matrixSize * Math.sqrt(fraction));
+  const maxMargin = Math.max(
+    0,
+    Math.floor((maxExclusionSide - Math.max(width, height)) / 2),
+  );
+  return Math.min(margin, maxMargin);
+}
+
 // ─── Critical-zone constants ─────────────────────────────────────────────────
 // Each finder pattern is 7×7 modules.  The 1-module-wide separator that
 // surrounds it on the inner sides is also forbidden (QR spec requires it to be
@@ -273,6 +306,7 @@ function clampImageFromEyes(
 function resolveImagePositions(
   images: QrImage[],
   matrixSize: number,
+  ecl: string,
 ): ResolvedQrImage[] {
   // Inner data zone — starts after finder + separator on each side
   const dataStart = CRITICAL; // = 8
@@ -358,16 +392,19 @@ function resolveImagePositions(
       width,
       height,
       excludeDots,
-      margin,
       opacity,
       preserveAspectRatio,
     } = img;
+    const safeMargin =
+      excludeDots && img.margin != null
+        ? clampImageExclusion(width, height, img.margin, matrixSize, ecl)
+        : img.margin;
     const base = {
       source,
       width,
       height,
       excludeDots,
-      margin,
+      margin: safeMargin,
       opacity,
       preserveAspectRatio,
     };
@@ -1032,7 +1069,11 @@ export async function QRCodeGenerate(
   const drawnEyes = new Set<string>();
 
   // Resolve auto-positions for images without explicit x/y
-  const images = resolveImagePositions(config.images || [], matrixSize);
+  const images = resolveImagePositions(
+    config.images || [],
+    matrixSize,
+    config.qrOptions?.errorCorrectionLevel || "H",
+  );
 
   for (let y = 0; y < matrixSize; y++) {
     for (let x = 0; x < matrixSize; x++) {
