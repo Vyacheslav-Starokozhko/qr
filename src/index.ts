@@ -149,7 +149,16 @@ function createSymbol(id: string, part: QrPartOptions): string {
 // --- Auto-layout for images ---
 
 /** Internal image type with resolved flat x/y coordinates (in matrix modules). */
-type ResolvedQrImage = Omit<QrImage, "position"> & { x: number; y: number };
+type ResolvedQrImage = Omit<QrImage, "position"> & {
+  x: number;
+  y: number;
+  /** Clamped width used for dot-exclusion zone (visual width may differ). */
+  excW: number;
+  /** Clamped height used for dot-exclusion zone (visual height may differ). */
+  excH: number;
+  /** Clamped margin used for dot-exclusion zone. */
+  excMargin: number;
+};
 
 /**
  * Max fraction of total QR area that can be safely obscured per error-correction level.
@@ -163,9 +172,10 @@ const ECL_SAFE_FRACTION: Record<string, number> = {
 };
 
 /**
- * Clamp an image's excludeDots margin so the exclusion zone (image + 2×margin) never
- * exceeds the ECL-safe area. Uses step-1 (integer-module) resolution for the max so
- * small QR codes get tighter limits than large ones.
+ * Clamp an image's exclusion zone (width, height, margin) so it never exceeds
+ * the ECL-safe area. Uses step-1 (integer-module) resolution so small QR codes
+ * get tighter limits than large ones.
+ * The visual image size is unchanged — only the dot-exclusion bounds are clamped.
  */
 function clampImageExclusion(
   width: number,
@@ -173,15 +183,16 @@ function clampImageExclusion(
   margin: number,
   matrixSize: number,
   ecl: string,
-): number {
+): { excW: number; excH: number; excMargin: number } {
   const fraction = ECL_SAFE_FRACTION[ecl] ?? 0.30;
-  // Integer-module ceiling: largest square that fits within the safe area
   const maxExclusionSide = Math.floor(matrixSize * Math.sqrt(fraction));
+  const excW = Math.min(width, maxExclusionSide);
+  const excH = Math.min(height, maxExclusionSide);
   const maxMargin = Math.max(
     0,
-    Math.floor((maxExclusionSide - Math.max(width, height)) / 2),
+    Math.floor((maxExclusionSide - Math.max(excW, excH)) / 2),
   );
-  return Math.min(margin, maxMargin);
+  return { excW, excH, excMargin: Math.min(margin, maxMargin) };
 }
 
 // ─── Critical-zone constants ─────────────────────────────────────────────────
@@ -395,18 +406,21 @@ function resolveImagePositions(
       opacity,
       preserveAspectRatio,
     } = img;
-    const safeMargin =
+    const { excW, excH, excMargin } =
       excludeDots && img.margin != null
         ? clampImageExclusion(width, height, img.margin, matrixSize, ecl)
-        : img.margin;
+        : { excW: width, excH: height, excMargin: img.margin ?? 0 };
     const base = {
       source,
       width,
       height,
       excludeDots,
-      margin: safeMargin,
+      margin: img.margin,
       opacity,
       preserveAspectRatio,
+      excW,
+      excH,
+      excMargin,
     };
 
     if (pos?.type === "custom") {
@@ -1105,12 +1119,19 @@ export async function QRCodeGenerate(
 
       const isBlocked = images.some((img) => {
         if (!img.excludeDots) return false;
-        const imgMargin = img.margin ?? 0;
+        // Use clamped exclusion bounds (excW/excH/excMargin) centred on the image.
+        // This prevents an oversized image from wiping all dots even when the
+        // visual image is larger than the safe ECL area.
+        const cx = img.x + img.width / 2;
+        const cy = img.y + img.height / 2;
+        const ex = cx - img.excW / 2;
+        const ey = cy - img.excH / 2;
+        const m = img.excMargin;
         return (
-          x >= img.x - 0.5 - imgMargin &&
-          x <= img.x + img.width - 0.5 + imgMargin &&
-          y >= img.y - 0.5 - imgMargin &&
-          y <= img.y + img.height - 0.5 + imgMargin
+          x >= ex - 0.5 - m &&
+          x <= ex + img.excW - 0.5 + m &&
+          y >= ey - 0.5 - m &&
+          y <= ey + img.excH - 0.5 + m
         );
       });
       if (isBlocked) continue;
