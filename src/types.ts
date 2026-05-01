@@ -352,6 +352,8 @@ export type Options = {
   margin?: number; // Padding in modules (default 4)
   borderRadius?: number; // Corner radius as a percentage (0–100). 100 = fully rounded (circle). Scale-independent.
 
+  backgroundEnable?: boolean; // If false, background is transparent; if true, backgroundOptions is used
+
   backgroundOptions?: {
     color?: string;
     gradient?: Gradient;
