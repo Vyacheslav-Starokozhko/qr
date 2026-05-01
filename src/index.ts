@@ -1113,7 +1113,7 @@ export async function QRCodeGenerate(
 
   // Resolve auto-positions for images without explicit x/y
   const images = resolveImagePositions(
-    config.images || [],
+    config.imageEnable !== false ? (config.images || []) : [],
     matrixSize,
     config.qrOptions?.errorCorrectionLevel || "H",
   );

@@ -354,6 +354,8 @@ export type Options = {
 
   backgroundEnable?: boolean; // If false, background is transparent; if true, backgroundOptions is used
 
+  imageEnable?: boolean; // If false, images[] are not rendered (and dots are not excluded)
+
   backgroundOptions?: {
     color?: string;
     gradient?: Gradient;
