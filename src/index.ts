@@ -964,7 +964,7 @@ export async function QRCodeGenerate(
   let defsString = "";
 
   // A. Background Gradient (FIXED)
-  if (config.backgroundOptions?.gradient) {
+  if (config.backgroundEnable !== false && config.backgroundOptions?.gradient) {
     defsString += generateGradientDef(
       "grad-bg",
       config.backgroundOptions.gradient,
@@ -1279,8 +1279,9 @@ export async function QRCodeGenerate(
 
   // Background Fill Logic (Color OR Gradient)
   const getBackgroundFill = () => {
+    if (config.backgroundEnable === false) return "none";
     if (config.backgroundOptions?.gradient) return "url(#grad-bg)";
-    return config.backgroundOptions?.color || "white"; // default white
+    return config.backgroundOptions?.color || "white";
   };
 
   // Images SVG (x/y are always resolved by resolveImagePositions)
@@ -1397,7 +1398,7 @@ export async function QRCodeGenerate(
     <defs>${defsString}${clipPathDef}</defs>
     <g ${clipAttr}>
       <rect width="${fullSize}" height="${fullSize}" fill="${getBackgroundFill()}" ${bgRxAttr}/>
-      ${config.backgroundOptions?.image ? `<image href="${config.backgroundOptions.image}" width="${fullSize}" height="${fullSize}" preserveAspectRatio="none" />` : ""}
+      ${config.backgroundEnable !== false && config.backgroundOptions?.image ? `<image href="${config.backgroundOptions.image}" width="${fullSize}" height="${fullSize}" preserveAspectRatio="none" />` : ""}
       ${decorationsSvg}
       ${generateDotsLayer()}
       ${generateEyeLayer("cornerSquare", "grad-sq", config.cornersSquareOptions)}

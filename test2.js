@@ -67,6 +67,7 @@ const fullWLogo = path1 + " " + path2; // Just concatenating
     margin: 4,
     width: 500,
     height: 500,
+    backgroundEnable: false,
     backgroundOptions: { color: "#ffffff" },
     dotsOptions: {
       shape: { type: "figure", path: "extra-rounded" },
