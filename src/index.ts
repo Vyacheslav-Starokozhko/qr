@@ -523,9 +523,29 @@ export async function scanQR(
 
 // --- Main Function ---
 
+/**
+ * Slider/input maximums derived from the generated QR code.
+ * Re-read these after every `update()` call — they change with the matrix size.
+ */
+export interface QRMaxValues {
+  /** Max image width/height in modules (ECL-aware). */
+  imageSize: number;
+  /** Max QR border margin in modules. */
+  frameMargin: number;
+  /**
+   * Max safe excludeDots margin for the given image size (integer module step).
+   * Wire this to your margin slider's `max` attribute, updated whenever the
+   * image-size slider changes.
+   * @example
+   * marginInput.max = String(maxValues.getImageMargin(+imageSizeInput.value));
+   */
+  getImageMargin: (imageSize: number) => number;
+}
+
 interface QRGenerateResultBase {
   matrixSize: number;
   eyeZones: QREyeZone[];
+  maxValues: QRMaxValues;
   getMaxPos: (
     imageWidth: number,
     imageHeight: number,
@@ -977,9 +997,19 @@ export async function QRCodeGenerate(
     maxX: Math.max(0, matrixSize - iw),
     maxY: Math.max(0, matrixSize - ih),
   });
+  const _ecl = config.qrOptions?.errorCorrectionLevel || "H";
+  const _eclFraction = ECL_SAFE_FRACTION[_ecl] ?? 0.30;
+  const _maxExclusionSide = Math.floor(matrixSize * Math.sqrt(_eclFraction));
+  const _maxValues: QRMaxValues = {
+    imageSize: _maxExclusionSide,
+    frameMargin: matrixSize,
+    getImageMargin: (imgSize: number) =>
+      Math.max(0, Math.floor((_maxExclusionSide - Math.max(0, imgSize)) / 2)),
+  };
   const base: QRGenerateResultBase = {
     matrixSize,
     eyeZones: _eyeZones,
+    maxValues: _maxValues,
     getMaxPos: _getMaxPos,
   };
   const _uid = ++_qrIdCtr;
@@ -1870,6 +1900,8 @@ export interface QRBounds {
   matrixSize: number;
   /** The 3 eye (finder pattern) zones in module coordinates */
   eyeZones: QREyeZone[];
+  /** Slider/input maximums derived from this QR's matrix size and ECL. */
+  maxValues: QRMaxValues;
   /**
    * Returns the maximum allowed top-left position for an image of the given size,
    * so it stays fully inside the QR area.
@@ -1904,9 +1936,18 @@ export function getQRBounds(
     height: 7,
   }));
 
+  const _eclFraction = ECL_SAFE_FRACTION[errorCorrectionLevel] ?? 0.30;
+  const _maxExclusionSide = Math.floor(matrixSize * Math.sqrt(_eclFraction));
+
   return {
     matrixSize,
     eyeZones,
+    maxValues: {
+      imageSize: _maxExclusionSide,
+      frameMargin: matrixSize,
+      getImageMargin: (imgSize: number) =>
+        Math.max(0, Math.floor((_maxExclusionSide - Math.max(0, imgSize)) / 2)),
+    },
     getMaxPos: (imageWidth: number, imageHeight: number) => ({
       maxX: Math.max(0, matrixSize - imageWidth),
       maxY: Math.max(0, matrixSize - imageHeight),
@@ -2003,6 +2044,7 @@ export async function createQRCode(initialOptions: Options): Promise<QRCodeHandl
     canvas: initial.canvas,
     matrixSize: initial.matrixSize,
     eyeZones: initial.eyeZones,
+    maxValues: initial.maxValues,
     getMaxPos: initial.getMaxPos,
 
     async update(partialOptions: Partial<Options>): Promise<QRCodeHandle> {
@@ -2012,6 +2054,7 @@ export async function createQRCode(initialOptions: Options): Promise<QRCodeHandl
       handle.canvas = result.canvas;
       handle.matrixSize = result.matrixSize;
       handle.eyeZones = result.eyeZones;
+      handle.maxValues = result.maxValues;
       handle.getMaxPos = result.getMaxPos;
       return handle;
     },
