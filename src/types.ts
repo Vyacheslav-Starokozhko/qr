@@ -204,6 +204,33 @@ export type QRScanState = {
   data: string | null;
 };
 
+/**
+ * Result of pixel-based QR validation via {@link QRGenerateResult.validate}.
+ * Validates by sampling the rendered canvas against the known source matrix —
+ * works correctly with all dot shapes, gradients, and inverted color schemes.
+ */
+export type QRValidateResult = {
+  /** true when all structural zones are intact and contrast is sufficient */
+  valid: boolean;
+  /** WCAG relative contrast ratio between mean dark and mean light module luminance */
+  contrastRatio: number;
+  /** Total number of modules that rendered with the wrong luminance */
+  degradedModules: number;
+  /** Total modules sampled (finder + timing + data) */
+  totalModules: number;
+  /** Whether all 3 finder patterns (eyes) are fully intact */
+  finderPatternsOk: boolean;
+  /** Whether timing patterns (row 6 / col 6) are fully intact */
+  timingPatternsOk: boolean;
+  /**
+   * Remaining ECC capacity as a fraction 0–1.
+   * 1 = no degraded data modules; 0 = ECC tolerance exhausted.
+   */
+  eccHeadroom: number;
+  /** Human-readable list of detected issues; empty when valid */
+  issues: string[];
+};
+
 // Built-in geometric decoration shapes
 export type QrDecorationBuiltinShape =
   | "dot"
@@ -247,6 +274,7 @@ export type QrDecorationPlacement =
 export type QrDecoration = {
   shape?: QrDecorationShape; // default "dot"
   color?: string; // fill color / stroke color (default "#000000")
+  gradient?: Gradient; // gradient fill (overrides color when set)
   size?: number; // size in modules (default 0.6)
   count?: number; // number of elements to place (default: auto-computed)
   seed?: number; // PRNG seed for reproducible random placement (default 42)

@@ -1,5 +1,6 @@
 import jsQR from "jsqr";
 import { QRAnalyzer } from "./core/analyzer";
+import { validateQRCanvas } from "./core/validator";
 import { QRShapes, shapes } from "./renderer/icons";
 import { neighborShapes, Neighbors } from "./renderer/dots";
 import { cornerDots } from "./renderer/cornerDot";
@@ -11,6 +12,7 @@ import {
   QrImagePosition,
   Gradient,
   QRScanState,
+  QRValidateResult,
   QrDecoration,
   QrDecorationBuiltinShape,
   QrWrapperShape,
@@ -567,6 +569,13 @@ export interface QRGenerateResult extends QRGenerateResultBase {
   svg: string;
   /** Rendered canvas. `null` in non-browser environments (Node.js). */
   canvas: HTMLCanvasElement | null;
+  /**
+   * Pixel-based QR validation — samples the rendered canvas against the known
+   * source matrix to check contrast, finder/timing pattern integrity, and
+   * ECC headroom. Works with all dot shapes and color schemes.
+   * Returns an error result when called in a non-browser environment.
+   */
+  validate: () => QRValidateResult;
 }
 
 async function svgToCanvas(
@@ -641,19 +650,19 @@ function _renderBuiltinDecoration(
   cx: number,
   cy: number,
   size: number,
-  color: string,
+  fillRef: string,
   opacity: number,
 ): string {
   const r = size / 2;
   const op = opacity < 1 ? ` opacity="${_f(opacity)}"` : "";
-  const fill = `fill="${color}"`;
+  const fill = `fill="${fillRef}"`;
 
   switch (shape) {
     case "dot":
       return `<circle cx="${_f(cx)}" cy="${_f(cy)}" r="${_f(r)}" ${fill}${op}/>`;
 
     case "ring":
-      return `<circle cx="${_f(cx)}" cy="${_f(cy)}" r="${_f(r * 0.65)}" fill="none" stroke="${color}" stroke-width="${_f(r * 0.5)}"${op}/>`;
+      return `<circle cx="${_f(cx)}" cy="${_f(cy)}" r="${_f(r * 0.65)}" fill="none" stroke="${fillRef}" stroke-width="${_f(r * 0.5)}"${op}/>`;
 
     case "square":
       return `<rect x="${_f(cx - r)}" y="${_f(cy - r)}" width="${_f(size)}" height="${_f(size)}" ${fill}${op}/>`;
@@ -815,6 +824,18 @@ function generateDecorationsSvg(
 
     const opAttr = opacity < 1 ? ` opacity="${_f(opacity)}"` : "";
 
+    // ── Resolve fill reference (gradient or plain color) ─────────────────────
+    let fillRef = color;
+    if (dec.gradient) {
+      const gradId = `_dec_grad_${layerIdx}`;
+      const zBx = Math.min(...validZones.map((z) => z.x1));
+      const zBy = Math.min(...validZones.map((z) => z.y1));
+      const zBw = Math.max(...validZones.map((z) => z.x2)) - zBx;
+      const zBh = Math.max(...validZones.map((z) => z.y2)) - zBy;
+      defsStr += generateGradientDef(gradId, dec.gradient, zBx, zBy, zBw, zBh);
+      fillRef = `url(#${gradId})`;
+    }
+
     // ── Render based on shape type ───────────────────────────────────────────
     if (typeof shapeDef === "string") {
       // Built-in geometric shape
@@ -824,7 +845,7 @@ function generateDecorationsSvg(
           cx,
           cy,
           size,
-          color,
+          fillRef,
           opacity,
         );
       }
@@ -854,7 +875,7 @@ function generateDecorationsSvg(
       defsStr += `<symbol id="${symId}" viewBox="${viewBox}">${symContent}</symbol>`;
 
       for (const { cx, cy } of placed) {
-        elemsStr += `<use href="#${symId}" x="${_f(cx - halfSize)}" y="${_f(cy - halfSize)}" width="${_f(size)}" height="${_f(size)}" fill="${color}"${opAttr}/>`;
+        elemsStr += `<use href="#${symId}" x="${_f(cx - halfSize)}" y="${_f(cy - halfSize)}" width="${_f(size)}" height="${_f(size)}" fill="${fillRef}"${opAttr}/>`;
       }
     }
   }
@@ -1029,7 +1050,22 @@ export async function QRCodeGenerate(
   const finalizeResult = async (svg: string): Promise<QRGenerateResult> => {
     const prefixed = prefixSvgIds(svg, `qr${_uid}-`);
     const canvas = await svgToCanvas(prefixed, w, h);
-    return { ...base, svg: prefixed, canvas };
+    const validate = (): QRValidateResult => {
+      if (!canvas) {
+        return {
+          valid: false,
+          contrastRatio: 1,
+          degradedModules: 0,
+          totalModules: 0,
+          finderPatternsOk: false,
+          timingPatternsOk: false,
+          eccHeadroom: 0,
+          issues: ["validate() requires a browser environment (canvas is null)"],
+        };
+      }
+      return validateQRCanvas(canvas, matrix, effectiveMargin, _ecl);
+    };
+    return { ...base, svg: prefixed, canvas, validate };
   };
 
   const fullSize = matrixSize + effectiveMargin * 2;
@@ -2065,6 +2101,7 @@ export async function createQRCode(initialOptions: Options): Promise<QRCodeHandl
     eyeZones: initial.eyeZones,
     maxValues: initial.maxValues,
     getMaxPos: initial.getMaxPos,
+    validate: initial.validate,
 
     async update(partialOptions: Partial<Options>): Promise<QRCodeHandle> {
       opts = mergeQROptions(opts, partialOptions);
@@ -2075,6 +2112,7 @@ export async function createQRCode(initialOptions: Options): Promise<QRCodeHandl
       handle.eyeZones = result.eyeZones;
       handle.maxValues = result.maxValues;
       handle.getMaxPos = result.getMaxPos;
+      handle.validate = result.validate;
       return handle;
     },
   };
