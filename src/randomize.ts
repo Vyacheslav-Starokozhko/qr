@@ -55,22 +55,22 @@ function hslToHex(h: number, s: number, l: number): string {
   return `#${f(0)}${f(8)}${f(4)}`;
 }
 
-// Lightness 8–15 % — worst-case WCAG contrast ≥ 7:1 against any light background
-// produced by randomLightFill (even high-luminance hues like green/yellow).
+// L 15–38 %, S 85–100 % — vibrant saturated colors that are still dark enough
+// for acceptable contrast against a light background in most hue combinations.
 function randomDarkColor(rng: () => number): string {
   return hslToHex(
     Math.floor(rng() * 360),
-    60 + Math.floor(rng() * 40),
-    8 + Math.floor(rng() * 8),
+    85 + Math.floor(rng() * 15),
+    15 + Math.floor(rng() * 24),
   );
 }
 
-// Lightness 85–97 %, low saturation — always sufficient contrast against dark dots.
+// L 72–93 %, S 30–75 % — genuinely colorful backgrounds, not near-white.
 function randomLightColor(rng: () => number): string {
   return hslToHex(
     Math.floor(rng() * 360),
-    Math.floor(rng() * 25),
-    85 + Math.floor(rng() * 13),
+    30 + Math.floor(rng() * 45),
+    72 + Math.floor(rng() * 22),
   );
 }
 
