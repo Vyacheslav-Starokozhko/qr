@@ -25,8 +25,8 @@ import { defaultOptions } from "./default";
 export { exportQR, QRShapes, FileExtension, ExportOptions };
 
 export * from "./types";
-export { randomizeOptions, randomizeUntilValid } from "./randomize";
-export type { RandomizeConfig, RandomizeValidateOptions } from "./randomize";
+export { randomizeOptions, invertOptions } from "./randomize";
+export type { RandomizeConfig } from "./randomize";
 
 // --- Helpers ---
 
