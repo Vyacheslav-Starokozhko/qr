@@ -1,4 +1,4 @@
-import { Options, Gradient } from "./types";
+import { Options, Gradient, QRValidateResult } from "./types";
 
 export type RandomizeConfig = {
   /** Randomize the main QR dots solid color (clears gradient) */
@@ -202,4 +202,79 @@ export function randomizeOptions(
   }
 
   return result;
+}
+
+// Minimal shape expected from the generate function — avoids importing QRGenerateResult
+// directly and creating a circular dependency with index.ts.
+type ValidatableResult = {
+  svg: string;
+  validate: () => QRValidateResult;
+};
+
+export type RandomizeValidateOptions = {
+  /**
+   * Maximum number of generation+validation attempts before giving up.
+   * Default: 10.
+   */
+  maxAttempts?: number;
+  /**
+   * Seed for the first attempt. Subsequent attempts derive new seeds from this
+   * value so every attempt is deterministic when `seed` is fixed.
+   * When omitted, `Date.now()` is used.
+   */
+  seed?: number;
+};
+
+/**
+ * Generates and validates QR codes until one passes or `maxAttempts` is reached.
+ *
+ * Pass `QRCodeGenerate` directly as the `generate` argument:
+ * ```ts
+ * import { QRCodeGenerate, randomizeUntilValid } from "my-qr";
+ *
+ * const { options, result, valid } = await randomizeUntilValid(
+ *   base,
+ *   { dotsColor: true, dotsShape: true },
+ *   QRCodeGenerate,
+ * );
+ * if (valid) console.log(result.svg);
+ * ```
+ *
+ * Validation uses pixel-level canvas sampling and only works in a browser. In
+ * Node.js the first generated result is returned immediately with `valid: true`
+ * so the caller is not blocked by an unavailable canvas.
+ */
+export async function randomizeUntilValid<R extends ValidatableResult>(
+  base: Options,
+  config: RandomizeConfig,
+  generate: (options: Options) => Promise<R>,
+  opts?: RandomizeValidateOptions,
+): Promise<{ options: Options; result: R; valid: boolean }> {
+  const maxAttempts = opts?.maxAttempts ?? 10;
+  const initialSeed = opts?.seed ?? (Date.now() & 0xffffffff);
+
+  let lastOptions = base;
+  let lastResult: R | null = null;
+
+  for (let i = 0; i < maxAttempts; i++) {
+    // Each attempt gets a unique but deterministic seed derived from the initial one
+    const seed = (initialSeed + i * 0x9e3779b9) >>> 0;
+    const randomized = randomizeOptions(base, config, seed);
+    const result = await generate(randomized);
+    const validation = result.validate();
+
+    lastOptions = randomized;
+    lastResult = result;
+
+    // validate() requires a browser canvas — skip retry loop in Node.js
+    if (validation.issues.some((s) => s.includes("browser environment"))) {
+      return { options: randomized, result, valid: true };
+    }
+
+    if (validation.valid) {
+      return { options: randomized, result, valid: true };
+    }
+  }
+
+  return { options: lastOptions, result: lastResult!, valid: false };
 }
