@@ -8,15 +8,20 @@ const ECL_CAPACITY: Record<string, number> = {
 };
 
 const FINDER_SIZE = 7;
-const MIN_CONTRAST_RATIO = 3.0;
+// QR scanners operate reliably well below the WCAG 3.0 text-accessibility
+// threshold. 2.5:1 still catches genuinely unreadable QR codes while accepting
+// gradient/overlay combinations whose canvas-sampled average dips slightly
+// below what a pure-color calculation would give.
+const MIN_CONTRAST_RATIO = 2.5;
 // Inner sampling inset: 20% on each side → use middle 60% of module to avoid
 // anti-aliasing and shape-dependent pixel bleeding at edges
 const SAMPLE_PAD = 0.2;
-// Finder patterns with custom shapes (extra-rounded, classy, etc.) always have
-// some corner modules that render as background. Allow up to 10% degradation
-// before treating finder patterns as broken (12/147 ≈ 8.2% for typical
-// extra-rounded outer-eye with 4 empty corners per pattern × 3 patterns).
-const FINDER_DEGRADED_THRESHOLD = 0.10;
+// Custom outer-eye shapes (circle, star, heart, extra-rounded) can leave many
+// modules in the 7×7 finder zone rendering as background. A circle frame
+// produces ~8 empty modules per pattern × 3 = 24 out of 147 (≈16%).
+// 25% tolerance accepts all standard decorative shapes while still flagging
+// truly broken patterns where half the finder area is wrong.
+const FINDER_DEGRADED_THRESHOLD = 0.25;
 
 function srgbToLinear(c: number): number {
   const n = c / 255;
