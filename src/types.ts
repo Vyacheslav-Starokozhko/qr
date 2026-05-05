@@ -109,10 +109,54 @@ export type QrShape = {
   viewBox?: string;
 };
 
+/** Solid color or gradient fill for one overlay layer */
+export type QrLayerFill =
+  | { type: "color"; color: string }
+  | { type: "gradient"; gradient: Gradient };
+
+/** Geometric mask that shapes which areas of a layer's fill are visible */
+export type QrOverlayMask =
+  | { type: "stripe";  scale?: number; angle?: number }
+  | { type: "zigzag";  scale?: number }
+  | { type: "wave";    scale?: number }
+  | { type: "checker"; scale?: number }
+  | {
+      type: "custom";
+      /** SVG path data for one repeating tile */
+      path: string;
+      /** Tile width in module units (default: 10) */
+      tileWidth?: number;
+      /** Tile height in module units (default: 10) */
+      tileHeight?: number;
+    };
+
+/**
+ * A single fill layer rendered through a geometric mask on QR dots or eyes.
+ * Stack multiple layers in `overlays[]` for compound visual effects —
+ * index 0 = bottom, last index = top.
+ */
+export type QrOverlay = {
+  /** Color or gradient fill for this layer */
+  fill: QrLayerFill;
+  /**
+   * Geometric mask — determines which parts of the fill are visible.
+   * Omit for full-coverage fill (base layer).
+   */
+  mask?: QrOverlayMask;
+  /** 0–1, default 1 */
+  opacity?: number;
+};
+
 export type QrPartOptions = {
   shape?: QrShape;
   color?: string;
   gradient?: Gradient;
+  /**
+   * Stacked fill layers, each with its own color/gradient and optional geometric mask.
+   * Takes priority over `gradient` and `color` when set.
+   * Index 0 = bottom layer, last = top.
+   */
+  overlays?: QrOverlay[];
   scale?: number; // 0.1 ... 1.0 (Density)
   isSingle?: boolean; // Only for innerEye/cornersDot: draw one large element instead of 3×3
 };

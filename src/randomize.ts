@@ -2,6 +2,9 @@ import {
   Options,
   Gradient,
   QrPartOptions,
+  QrOverlay,
+  QrOverlayMask,
+  QrLayerFill,
   QrDecorationBuiltinShape,
   QrDecorationPlacement,
 } from "./types";
@@ -25,6 +28,12 @@ export type RandomizeConfig = {
   borderRadius?: boolean;
   /** Generate random decoration layers in the QR margin */
   decorations?: boolean;
+  /** Randomize the main QR dots fill pattern (stripe/zigzag/wave/checker) */
+  dotsPattern?: boolean;
+  /** Randomize inner eye (ball) fill pattern */
+  cornersDotPattern?: boolean;
+  /** Randomize outer eye (frame) fill pattern */
+  cornersSquarePattern?: boolean;
 };
 
 function mulberry32(seed: number): () => number {
@@ -147,6 +156,31 @@ const OUTER_EYE_SHAPES = [
   "outer-eye-star",
 ] as const;
 
+const MASK_TYPES: QrOverlayMask["type"][] = ["stripe", "zigzag", "wave", "checker"];
+
+function randomLayerFill(colorFn: (rng: () => number) => string, rng: () => number): QrLayerFill {
+  if (rng() < 0.5) return { type: "gradient", gradient: randomGradient(colorFn, rng) };
+  return { type: "color", color: colorFn(rng) };
+}
+
+function randomMask(rng: () => number): QrOverlayMask {
+  const type = pick(MASK_TYPES, rng);
+  const scale = 2 + rng() * 4; // 2–6 modules
+  if (type === "stripe") return { type, scale, angle: Math.floor(rng() * 180) };
+  return { type, scale } as QrOverlayMask;
+}
+
+/** Generates 1–2 stacked overlay layers for a dots/eye part. */
+function randomOverlays(rng: () => number): QrOverlay[] {
+  const layerCount = rng() < 0.5 ? 1 : 2;
+  return Array.from({ length: layerCount }, (_, i) => ({
+    fill: randomLayerFill(randomDarkColor, rng),
+    // First layer: full coverage (base). Additional layers: pattern mask.
+    mask: i === 0 ? undefined : randomMask(rng),
+    opacity: i === 0 ? 1 : 0.5 + rng() * 0.5,
+  }));
+}
+
 const DECORATION_SHAPES: QrDecorationBuiltinShape[] = [
   "dot",
   "ring",
@@ -192,9 +226,16 @@ export function randomizeOptions(
   const result: Options = { ...base };
 
   // --- dots ---
-  if (config.dotsColor || config.dotsShape) {
+  if (config.dotsColor || config.dotsShape || config.dotsPattern) {
     result.dotsOptions = { ...base.dotsOptions };
-    if (config.dotsColor) Object.assign(result.dotsOptions, randomDarkFill(rng));
+    if (config.dotsPattern) {
+      result.dotsOptions.overlays = randomOverlays(rng);
+      result.dotsOptions.color = undefined;
+      result.dotsOptions.gradient = undefined;
+    } else if (config.dotsColor) {
+      Object.assign(result.dotsOptions, randomDarkFill(rng));
+      result.dotsOptions.overlays = undefined;
+    }
     if (config.dotsShape) {
       result.dotsOptions.shape =
         rng() > 0.5
@@ -204,18 +245,32 @@ export function randomizeOptions(
   }
 
   // --- inner eye (cornersDot) ---
-  if (config.cornersDotColor || config.cornersDotShape) {
+  if (config.cornersDotColor || config.cornersDotShape || config.cornersDotPattern) {
     result.cornersDotOptions = { ...base.cornersDotOptions };
-    if (config.cornersDotColor) Object.assign(result.cornersDotOptions, randomDarkFill(rng));
+    if (config.cornersDotPattern) {
+      result.cornersDotOptions.overlays = randomOverlays(rng);
+      result.cornersDotOptions.color = undefined;
+      result.cornersDotOptions.gradient = undefined;
+    } else if (config.cornersDotColor) {
+      Object.assign(result.cornersDotOptions, randomDarkFill(rng));
+      result.cornersDotOptions.overlays = undefined;
+    }
     if (config.cornersDotShape) {
       result.cornersDotOptions.shape = { type: "icon", path: pick(INNER_EYE_SHAPES, rng) };
     }
   }
 
   // --- outer eye (cornersSquare) ---
-  if (config.cornersSquareColor || config.cornersSquareShape) {
+  if (config.cornersSquareColor || config.cornersSquareShape || config.cornersSquarePattern) {
     result.cornersSquareOptions = { ...base.cornersSquareOptions };
-    if (config.cornersSquareColor) Object.assign(result.cornersSquareOptions, randomDarkFill(rng));
+    if (config.cornersSquarePattern) {
+      result.cornersSquareOptions.overlays = randomOverlays(rng);
+      result.cornersSquareOptions.color = undefined;
+      result.cornersSquareOptions.gradient = undefined;
+    } else if (config.cornersSquareColor) {
+      Object.assign(result.cornersSquareOptions, randomDarkFill(rng));
+      result.cornersSquareOptions.overlays = undefined;
+    }
     if (config.cornersSquareShape) {
       result.cornersSquareOptions.shape = { type: "icon", path: pick(OUTER_EYE_SHAPES, rng) };
     }
@@ -250,6 +305,185 @@ export function randomizeOptions(
   return result;
 }
 
+// ─── normalizeOptions ─────────────────────────────────────────────────────────
+
+function _hexToRgb(hex: string): [number, number, number] {
+  if (!hex.startsWith("#") || hex.length < 7) return [0, 0, 0];
+  const n = parseInt(hex.slice(1, 7), 16);
+  return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+}
+
+function _srgbLinear(c: number): number {
+  const n = c / 255;
+  return n <= 0.04045 ? n / 12.92 : ((n + 0.055) / 1.055) ** 2.4;
+}
+
+function _rgbLum(r: number, g: number, b: number): number {
+  return 0.2126 * _srgbLinear(r) + 0.7152 * _srgbLinear(g) + 0.0722 * _srgbLinear(b);
+}
+
+function _hexLum(hex: string): number {
+  return _rgbLum(..._hexToRgb(hex));
+}
+
+function _wcag(la: number, lb: number): number {
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+function _rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const r1 = r / 255, g1 = g / 255, b1 = b / 255;
+  const max = Math.max(r1, g1, b1), min = Math.min(r1, g1, b1);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l * 100];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h = 0;
+  if (max === r1) h = ((g1 - b1) / d + (g1 < b1 ? 6 : 0)) / 6;
+  else if (max === g1) h = ((b1 - r1) / d + 2) / 6;
+  else h = ((r1 - g1) / d + 4) / 6;
+  return [h * 360, s * 100, l * 100];
+}
+
+// Luminance of an HSL triple without allocating an intermediate hex string
+function _hslLum(h: number, s: number, l: number): number {
+  const sl = s / 100, ll = l / 100;
+  const a = sl * Math.min(ll, 1 - ll);
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12;
+    return Math.max(0, Math.min(255, Math.round(255 * (ll - a * Math.max(Math.min(k - 3, 9 - k, 1), -1)))));
+  };
+  return _rgbLum(f(0), f(8), f(4));
+}
+
+/**
+ * Shifts `color`'s HSL lightness (24-iteration binary search) until
+ * wcag(result, bgLum) >= minRatio. Hue and saturation are unchanged.
+ * Returns the original string unchanged when contrast is already sufficient.
+ *
+ * makeDarker = true  → decrease L (dots on light background)
+ * makeDarker = false → increase L (inverted QR — dots on dark background)
+ */
+function _adjustColor(color: string, bgLum: number, minRatio: number, makeDarker: boolean): string {
+  if (!color.startsWith("#")) return color;
+  const [r, g, b] = _hexToRgb(color);
+  if (_wcag(_rgbLum(r, g, b), bgLum) >= minRatio) return color;
+
+  const [h, s, l] = _rgbToHsl(r, g, b);
+  let lo = makeDarker ? 0 : l;
+  let hi = makeDarker ? l : 100;
+
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2;
+    if (makeDarker) {
+      // Maximize L (least darkening) while ratio >= minRatio
+      if (_wcag(_hslLum(h, s, mid), bgLum) >= minRatio) lo = mid; else hi = mid;
+    } else {
+      // Minimize L (least lightening) while ratio >= minRatio
+      if (_wcag(_hslLum(h, s, mid), bgLum) >= minRatio) hi = mid; else lo = mid;
+    }
+  }
+
+  return hslToHex(h, s, makeDarker ? lo : hi);
+}
+
+function _avgLum(hexColors: string[]): number {
+  if (!hexColors.length) return 0;
+  return hexColors.reduce((sum, c) => sum + _hexLum(c), 0) / hexColors.length;
+}
+
+function _gradLum(g: Gradient): number {
+  return _avgLum(g.colorStops.map((s) => s.color));
+}
+
+// Returns null when the part has no explicit color set (uses the library default)
+function _partLum(part: QrPartOptions | undefined): number | null {
+  if (!part) return null;
+  if (part.overlays?.length) {
+    const base = part.overlays.find((o) => !o.mask);
+    if (base) return base.fill.type === "color" ? _hexLum(base.fill.color) : _gradLum(base.fill.gradient);
+  }
+  if (part.gradient) return _gradLum(part.gradient);
+  if (part.color !== undefined) return _hexLum(part.color);
+  return null;
+}
+
+function _bgLum(options: Options): number {
+  if (options.backgroundEnable === false) return 1.0;
+  const bg = options.backgroundOptions;
+  if (!bg) return 1.0;
+  if (bg.gradient) return _gradLum(bg.gradient);
+  return _hexLum(bg.color ?? "#ffffff");
+}
+
+function _adjustGradient(g: Gradient, bgLum: number, minRatio: number, darker: boolean): Gradient {
+  return {
+    ...g,
+    colorStops: g.colorStops.map((s) => ({ ...s, color: _adjustColor(s.color, bgLum, minRatio, darker) })),
+  };
+}
+
+function _adjustFill(fill: QrLayerFill, bgLum: number, minRatio: number, darker: boolean): QrLayerFill {
+  if (fill.type === "color") return { type: "color", color: _adjustColor(fill.color, bgLum, minRatio, darker) };
+  return { type: "gradient", gradient: _adjustGradient(fill.gradient, bgLum, minRatio, darker) };
+}
+
+function _adjustPart(
+  part: QrPartOptions | undefined,
+  bgLum: number,
+  minRatio: number,
+  darker: boolean,
+): QrPartOptions | undefined {
+  if (!part) return part;
+  const result: QrPartOptions = { ...part };
+  if (part.overlays?.length) {
+    // Only adjust full-coverage base layers — masked decorative layers don't affect readability
+    result.overlays = part.overlays.map((o) =>
+      o.mask ? o : { ...o, fill: _adjustFill(o.fill, bgLum, minRatio, darker) },
+    );
+  } else if (part.gradient) {
+    result.gradient = _adjustGradient(part.gradient, bgLum, minRatio, darker);
+  } else if (part.color !== undefined) {
+    result.color = _adjustColor(part.color, bgLum, minRatio, darker);
+  }
+  return result;
+}
+
+/**
+ * Returns a copy of `base` with colors adjusted so the QR code is reliably
+ * scannable, while preserving the original design as closely as possible.
+ *
+ * **Only the HSL lightness channel is shifted** — hue and saturation stay the
+ * same, so colours keep their character (a muted red stays red, just darker).
+ * A binary search finds the *minimal* lightness shift that achieves the target
+ * contrast, so the visual change is as small as physics allows.
+ *
+ * Works with solid colors, gradients (each stop independently), and overlays
+ * (only full-coverage base layers — masked decorative layers are left untouched).
+ *
+ * Detects inverted QR codes (light dots on dark background) automatically and
+ * shifts in the correct direction for both cases.
+ *
+ * @param base        Source options (not mutated).
+ * @param minContrast Minimum WCAG contrast ratio (default 3.0).
+ */
+export function normalizeOptions(base: Options, minContrast = 3.0): Options {
+  const bgLum = _bgLum(base);
+  const dotsLum = _partLum(base.dotsOptions) ?? 0;
+
+  if (_wcag(dotsLum, bgLum) >= minContrast) return base;
+
+  // Standard: dark dots on light background → darken dots
+  // Inverted: light dots on dark background → lighten dots
+  const darkenDots = dotsLum <= bgLum;
+
+  return {
+    ...base,
+    dotsOptions: _adjustPart(base.dotsOptions, bgLum, minContrast, darkenDots),
+    cornersSquareOptions: _adjustPart(base.cornersSquareOptions, bgLum, minContrast, darkenDots),
+    cornersDotOptions: _adjustPart(base.cornersDotOptions, bgLum, minContrast, darkenDots),
+  };
+}
+
 // ─── invertOptions ────────────────────────────────────────────────────────────
 
 function invertHex(color: string): string {
@@ -265,12 +499,18 @@ function invertGradient(g: Gradient): Gradient {
   };
 }
 
+function invertLayerFill(fill: QrLayerFill): QrLayerFill {
+  if (fill.type === "color") return { type: "color", color: invertHex(fill.color) };
+  return { type: "gradient", gradient: invertGradient(fill.gradient) };
+}
+
 function invertPart(part: QrPartOptions | undefined): QrPartOptions | undefined {
   if (!part) return part;
   return {
     ...part,
     color: part.color !== undefined ? invertHex(part.color) : undefined,
     gradient: part.gradient !== undefined ? invertGradient(part.gradient) : undefined,
+    overlays: part.overlays?.map((o) => ({ ...o, fill: invertLayerFill(o.fill) })),
   };
 }
 

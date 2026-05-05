@@ -17,6 +17,8 @@ import {
   QrDecorationBuiltinShape,
   QrWrapperShape,
   QRMatrix,
+  QrOverlay,
+  QrOverlayMask,
 } from "./types";
 import { detectFrameInset } from "./frame-inset";
 import { exportQR, FileExtension, ExportOptions } from "./export";
@@ -25,7 +27,7 @@ import { defaultOptions } from "./default";
 export { exportQR, QRShapes, FileExtension, ExportOptions };
 
 export * from "./types";
-export { randomizeOptions, invertOptions } from "./randomize";
+export { randomizeOptions, invertOptions, normalizeOptions } from "./randomize";
 export type { RandomizeConfig } from "./randomize";
 
 // --- Helpers ---
@@ -117,6 +119,82 @@ function generateGradientDef(
         ${stops}
       </linearGradient>
     `;
+}
+
+/** Generates an SVG `<pattern>` element whose tile has a transparent background.
+ *  The geometric shape is filled with `fillRef` (a colour or `url(#gradient)`).
+ *  Stacking multiple such patterns on a dots/eye mask produces layered effects. */
+function generateMaskPatternDef(
+  id: string,
+  mask: QrOverlayMask,
+  fillRef: string,
+  fullSize: number,
+): string {
+  if (mask.type === "custom") {
+    const tw = mask.tileWidth ?? 10;
+    const th = mask.tileHeight ?? 10;
+    return `<pattern id="${id}" width="${tw}" height="${th}" patternUnits="userSpaceOnUse"><path d="${mask.path}" fill="${fillRef}"/></pattern>`;
+  }
+
+  const s = mask.scale ?? 3;
+  const cx = fullSize / 2, cy = fullSize / 2;
+
+  switch (mask.type) {
+    case "stripe": {
+      const a = mask.angle ?? 45;
+      // One filled stripe + one transparent gap per tile
+      return `<pattern id="${id}" width="${s * 2}" height="${s * 2}" patternUnits="userSpaceOnUse" patternTransform="rotate(${a},${cx},${cy})">
+        <rect width="${s * 2}" height="${s}" fill="${fillRef}"/>
+      </pattern>`;
+    }
+    case "zigzag": {
+      const w = s * 2, h = s * 2;
+      // Diamond / chevron shapes — transparent background
+      return `<pattern id="${id}" width="${w}" height="${h}" patternUnits="userSpaceOnUse">
+        <polygon points="0,${s} ${s},0 ${w},${s} ${s},${h}" fill="${fillRef}"/>
+      </pattern>`;
+    }
+    case "wave": {
+      const w = s * 4, h = s * 2;
+      // S-curve band — transparent above, filled below the wave boundary
+      return `<pattern id="${id}" width="${w}" height="${h}" patternUnits="userSpaceOnUse">
+        <path d="M0,${h / 2} C${w / 4},0 ${(w * 3) / 4},${h} ${w},${h / 2} L${w},${h} L0,${h} Z" fill="${fillRef}"/>
+      </pattern>`;
+    }
+    case "checker": {
+      const w = s * 2, h = s * 2;
+      return `<pattern id="${id}" width="${w}" height="${h}" patternUnits="userSpaceOnUse">
+        <rect width="${s}" height="${s}" fill="${fillRef}"/>
+        <rect x="${s}" y="${s}" width="${s}" height="${s}" fill="${fillRef}"/>
+      </pattern>`;
+    }
+  }
+}
+
+/** Builds all `<defs>` for one overlay layer and returns the resolved fill reference. */
+function generateOverlayLayerDef(
+  id: string,
+  layer: QrOverlay,
+  fullSize: number,
+): { defs: string; fillRef: string } {
+  let defs = "";
+  let fillRef: string;
+
+  if (layer.fill.type === "gradient") {
+    const gradId = `overlay-grad-${id}`;
+    defs += generateGradientDef(gradId, layer.fill.gradient, 0, 0, fullSize, fullSize);
+    fillRef = `url(#${gradId})`;
+  } else {
+    fillRef = layer.fill.color;
+  }
+
+  if (layer.mask) {
+    const patId = `overlay-pat-${id}`;
+    defs += generateMaskPatternDef(patId, layer.mask, fillRef, fullSize);
+    fillRef = `url(#${patId})`;
+  }
+
+  return { defs, fillRef };
 }
 
 function createSymbol(id: string, part: QrPartOptions): string {
@@ -1093,42 +1171,52 @@ export async function QRCodeGenerate(
     );
   }
 
-  // B. Global Dots Gradient
-  if (config.dotsOptions.gradient) {
-    defsString += generateGradientDef(
-      "grad-dots",
-      config.dotsOptions.gradient,
-      0,
-      0,
-      fullSize,
-      fullSize,
-    );
+  // B. Dots fill — overlays take priority over gradient/color
+  const dotsOverlayRefs: string[] = [];
+  if (config.dotsOptions.overlays?.length) {
+    for (let i = 0; i < config.dotsOptions.overlays.length; i++) {
+      const { defs, fillRef } = generateOverlayLayerDef(`dots-${i}`, config.dotsOptions.overlays[i], fullSize);
+      defsString += defs;
+      dotsOverlayRefs.push(fillRef);
+    }
+  } else if (config.dotsOptions.gradient) {
+    defsString += generateGradientDef("grad-dots", config.dotsOptions.gradient, 0, 0, fullSize, fullSize);
   }
 
-  // C. Independent Eye Gradients (FIXED LOGIC)
+  // C. Eye fills — overlays (shared across all eyes) or per-eye gradients
+  const squareOverlayRefs: string[] = [];
+  const dotOverlayRefs: string[] = [];
+
+  if (config.cornersSquareOptions.overlays?.length) {
+    for (let i = 0; i < config.cornersSquareOptions.overlays.length; i++) {
+      const { defs, fillRef } = generateOverlayLayerDef(`sq-${i}`, config.cornersSquareOptions.overlays[i], fullSize);
+      defsString += defs;
+      squareOverlayRefs.push(fillRef);
+    }
+  }
+  if (config.cornersDotOptions.overlays?.length) {
+    for (let i = 0; i < config.cornersDotOptions.overlays.length; i++) {
+      const { defs, fillRef } = generateOverlayLayerDef(`dot-${i}`, config.cornersDotOptions.overlays[i], fullSize);
+      defsString += defs;
+      dotOverlayRefs.push(fillRef);
+    }
+  }
+
   eyes.forEach((eye) => {
-    // 1. Gradient for the frame (Corner Square) - size 7×7
-    if (config.cornersSquareOptions.gradient) {
+    // Per-eye gradients (only when overlays are NOT used)
+    if (!squareOverlayRefs.length && config.cornersSquareOptions.gradient) {
       defsString += generateGradientDef(
         `grad-sq-${eye.id}`,
         config.cornersSquareOptions.gradient,
-        eye.x,
-        eye.y,
-        eyeFrameSize,
-        eyeFrameSize,
+        eye.x, eye.y, eyeFrameSize, eyeFrameSize,
       );
     }
-
-    // 2. Gradient for the center (Corner Dot) - size 3×3 (FIXED)
     // The +2 offset keeps the gradient tight around the ball area
-    if (config.cornersDotOptions.gradient) {
+    if (!dotOverlayRefs.length && config.cornersDotOptions.gradient) {
       defsString += generateGradientDef(
         `grad-dot-${eye.id}`,
         config.cornersDotOptions.gradient,
-        eye.x + 2,
-        eye.y + 2,
-        eyeDotSize,
-        eyeDotSize,
+        eye.x + 2, eye.y + 2, eyeDotSize, eyeDotSize,
       );
     }
   });
@@ -1356,21 +1444,26 @@ export async function QRCodeGenerate(
     const hasPaths = !!pathsD.dots;
     if (!hasUses && !hasPaths) return "";
 
-    const fill = config.dotsOptions.gradient
-      ? "url(#grad-dots)"
-      : config.dotsOptions.color;
-
     const maskContent =
       (hasUses ? uses.dots : "") +
       (hasPaths ? `<path d="${pathsD.dots}" />` : "");
 
-    return `
-        <mask id="mask-dots">
+    const maskDef = `<mask id="mask-dots">
             <rect width="${fullSize}" height="${fullSize}" fill="black" />
             <g fill="white">${maskContent}</g>
-        </mask>
-        <rect width="${fullSize}" height="${fullSize}" fill="${fill}" mask="url(#mask-dots)" />
-      `;
+        </mask>`;
+
+    if (dotsOverlayRefs.length) {
+      const rects = dotsOverlayRefs.map((ref, i) => {
+        const op = config.dotsOptions.overlays![i].opacity;
+        const opAttr = op !== undefined ? ` opacity="${op}"` : "";
+        return `<rect width="${fullSize}" height="${fullSize}" fill="${ref}" mask="url(#mask-dots)"${opAttr}/>`;
+      }).join("");
+      return `${maskDef}${rects}`;
+    }
+
+    const fill = config.dotsOptions.gradient ? "url(#grad-dots)" : config.dotsOptions.color;
+    return `${maskDef}<rect width="${fullSize}" height="${fullSize}" fill="${fill}" mask="url(#mask-dots)"/>`;
   };
 
   // Eyes Layer (Independent Gradients) — combines icon <use> elements and figure <path> data
@@ -1395,14 +1488,25 @@ export async function QRCodeGenerate(
         </mask>
       `;
 
+    const overlayRefs = key === "cornerSquare" ? squareOverlayRefs : dotOverlayRefs;
     let rects = "";
-    eyes.forEach((eye) => {
-      let fill = partConfig.color;
-      if (partConfig.gradient) {
-        fill = `url(#${gradPrefix}-${eye.id})`;
-      }
-      rects += `<rect x="${eye.x}" y="${eye.y}" width="${eyeFrameSize}" height="${eyeFrameSize}" fill="${fill}" mask="url(#${maskId})" />`;
-    });
+
+    if (overlayRefs.length) {
+      // Render each overlay layer for every eye
+      overlayRefs.forEach((ref, i) => {
+        const op = partConfig.overlays![i].opacity;
+        const opAttr = op !== undefined ? ` opacity="${op}"` : "";
+        eyes.forEach((eye) => {
+          rects += `<rect x="${eye.x}" y="${eye.y}" width="${eyeFrameSize}" height="${eyeFrameSize}" fill="${ref}" mask="url(#${maskId})"${opAttr}/>`;
+        });
+      });
+    } else {
+      eyes.forEach((eye) => {
+        let fill = partConfig.color;
+        if (partConfig.gradient) fill = `url(#${gradPrefix}-${eye.id})`;
+        rects += `<rect x="${eye.x}" y="${eye.y}" width="${eyeFrameSize}" height="${eyeFrameSize}" fill="${fill}" mask="url(#${maskId})" />`;
+      });
+    }
     return `<defs>${maskDef}</defs>${rects}`;
   };
 
