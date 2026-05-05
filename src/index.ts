@@ -28,7 +28,7 @@ export { exportQR, QRShapes, FileExtension, ExportOptions };
 
 export * from "./types";
 export { randomizeOptions, invertOptions, normalizeOptions } from "./randomize";
-export type { RandomizeConfig } from "./randomize";
+export type { RandomizeConfig, RandomizeTuning } from "./randomize";
 
 // --- Helpers ---
 

@@ -5,9 +5,77 @@ import {
   QrOverlay,
   QrOverlayMask,
   QrLayerFill,
+  QrShape,
   QrDecorationBuiltinShape,
   QrDecorationPlacement,
 } from "./types";
+
+/**
+ * Fine-grained tuning for {@link randomizeOptions}.
+ * Every field is optional — omitted values fall back to the built-in defaults.
+ */
+export type RandomizeTuning = {
+  /** 0–1 probability of a dark-background theme when `backgroundColor` is randomised. Default 0.45 */
+  darkThemeChance?: number;
+  /** 0–1 probability of gradient vs solid color for any fill. Default 0.60 */
+  gradientChance?: number;
+  /** 0–1 probability of a 3-stop gradient over a 2-stop one. Default 0.45 */
+  threeStopChance?: number;
+
+  /** HSL color ranges — each entry is [min, max] (inclusive, same units as CSS HSL). */
+  colors?: {
+    /** Lightness for dots/eyes on a light background.  Default [10, 32] */
+    darkLightness?: [number, number];
+    /** Saturation for dots/eyes on a light background. Default [85, 100] */
+    darkSaturation?: [number, number];
+    /** Lightness for dots/eyes on a dark background.  Default [62, 88] */
+    vividLightness?: [number, number];
+    /** Saturation for dots/eyes on a dark background. Default [80, 100] */
+    vividSaturation?: [number, number];
+    /** Background lightness — light theme.  Default [92, 98] */
+    lightBgLightness?: [number, number];
+    /** Background saturation — light theme. Default [10, 45] */
+    lightBgSaturation?: [number, number];
+    /** Background lightness — dark theme.  Default [4, 14] */
+    darkBgLightness?: [number, number];
+    /** Background saturation — dark theme. Default [40, 85] */
+    darkBgSaturation?: [number, number];
+    /** Shimmer overlay lightness  (accent on dark surfaces). Default [88, 98] */
+    shimmerLightness?: [number, number];
+    /** Shimmer overlay saturation (accent on dark surfaces). Default [0, 20] */
+    shimmerSaturation?: [number, number];
+  };
+
+  /** Overlay mask tuning. */
+  overlays?: {
+    /** [min, max] tile scale in modules. Default [0.7, 2.5] */
+    scaleRange?: [number, number];
+    /** [min, max] number of mask layers added on top of the base. Default [1, 2] */
+    layerCountRange?: [number, number];
+    /** [min, max] mask opacity on a dark background. Default [0.12, 0.40] */
+    opacityDark?: [number, number];
+    /** [min, max] mask opacity on a light background. Default [0.35, 0.85] */
+    opacityLight?: [number, number];
+    /** Mask shape types to draw from. Default: all four */
+    maskTypes?: Array<"stripe" | "zigzag" | "wave" | "checker">;
+    /** Allowed stripe angles in degrees. Default [0, 30, 45, 60, 90, 120, 135, 150] */
+    stripeAngles?: number[];
+  };
+
+  /** Shape pools — restrict which shapes each part can pick. */
+  shapes?: {
+    /** Figure shapes for dots. Default: all figure shapes */
+    dotFigures?: string[];
+    /** Icon shapes for dots. Default: all dot icon shapes */
+    dotIcons?: string[];
+    /** 0–1 chance of picking an icon shape vs a figure shape for dots. Default 0.5 */
+    dotIconChance?: number;
+    /** Inner eye (cornersDot) shapes. Default: all inner eye shapes */
+    innerEye?: string[];
+    /** Outer eye (cornersSquare) shapes. Default: all outer eye shapes */
+    outerEye?: string[];
+  };
+};
 
 export type RandomizeConfig = {
   /** Randomize the main QR dots color — randomly picks solid color or gradient */
@@ -83,130 +151,180 @@ function hslToHex(h: number, s: number, l: number): string {
   return `#${f(0)}${f(8)}${f(4)}`;
 }
 
-// L 15–38 %, S 85–100 % — vibrant saturated colors that are still dark enough
-// for acceptable contrast against a light background in most hue combinations.
-function randomDarkColor(rng: () => number): string {
-  return hslToHex(
-    Math.floor(rng() * 360),
-    85 + Math.floor(rng() * 15),
-    15 + Math.floor(rng() * 24),
-  );
-}
-
-// L 72–93 %, S 30–75 % — genuinely colorful backgrounds, not near-white.
-function randomLightColor(rng: () => number): string {
-  return hslToHex(
-    Math.floor(rng() * 360),
-    30 + Math.floor(rng() * 45),
-    72 + Math.floor(rng() * 22),
-  );
-}
-
-function randomGradient(colorFn: (rng: () => number) => string, rng: () => number): Gradient {
-  const linear = rng() < 0.5;
-  return {
-    type: linear ? "linear" : "radial",
-    ...(linear ? { rotation: Math.floor(rng() * 360) } : {}),
-    colorStops: [
-      { offset: "0%", color: colorFn(rng) },
-      { offset: "100%", color: colorFn(rng) },
-    ],
-  };
-}
-
-function randomDarkGradient(rng: () => number): Gradient {
-  return randomGradient(randomDarkColor, rng);
-}
-
-function randomLightGradient(rng: () => number): Gradient {
-  return randomGradient(randomLightColor, rng);
-}
-
-// Randomly picks solid color or gradient (~40 % chance of gradient).
-function randomDarkFill(rng: () => number): Pick<QrPartOptions, "color" | "gradient"> {
-  if (rng() < 0.4) return { gradient: randomDarkGradient(rng), color: undefined };
-  return { color: randomDarkColor(rng), gradient: undefined };
-}
-
-function randomLightFill(
-  rng: () => number,
-): Pick<Required<Options>["backgroundOptions"], "color" | "gradient"> {
-  if (rng() < 0.4) return { gradient: randomLightGradient(rng), color: undefined };
-  return { color: randomLightColor(rng), gradient: undefined };
-}
+// ── Shape pools (default values referenced by resolveT) ──────────────────────
 
 const DOT_ICON_SHAPES = [
-  "dots-square",
-  "dots-rounded",
-  "dots-classy",
-  "dots-classy-rounded",
-  "dots-extra-rounded",
+  "dots-square", "dots-rounded", "dots-classy", "dots-classy-rounded", "dots-extra-rounded",
 ] as const;
 
 const DOT_FIGURE_SHAPES = [
-  "square",
-  "dots",
-  "extra-rounded",
-  "rounded",
-  "classy",
-  "classy-rounded",
+  "square", "dots", "extra-rounded", "rounded", "classy", "classy-rounded",
 ] as const;
 
 const INNER_EYE_SHAPES = [
-  "inner-eye-square",
-  "inner-eye-dot",
-  "inner-eye-dots",
-  "inner-eye-rounded",
-  "inner-eye-classy",
-  "inner-eye-extra-rounded",
-  "inner-eye-extra-classy",
-  "inner-eye-star",
+  "inner-eye-square", "inner-eye-dot", "inner-eye-dots", "inner-eye-rounded",
+  "inner-eye-classy", "inner-eye-extra-rounded", "inner-eye-extra-classy", "inner-eye-star",
 ] as const;
 
 const OUTER_EYE_SHAPES = [
-  "outer-eye-square",
-  "outer-eye-dot",
-  "outer-eye-dots",
-  "outer-eye-rounded",
-  "outer-eye-classy",
-  "outer-eye-extra-rounded",
-  "outer-eye-extra-classy",
-  "outer-eye-heart",
-  "outer-eye-star",
+  "outer-eye-square", "outer-eye-dot", "outer-eye-dots", "outer-eye-rounded",
+  "outer-eye-classy", "outer-eye-extra-rounded", "outer-eye-extra-classy",
+  "outer-eye-heart", "outer-eye-star",
 ] as const;
 
-const MASK_TYPES: QrOverlayMask["type"][] = ["stripe", "zigzag", "wave", "checker"];
+// ── Tuning resolver ───────────────────────────────────────────────────────────
 
-function randomLayerFill(colorFn: (rng: () => number) => string, rng: () => number): QrLayerFill {
-  if (rng() < 0.5) return { type: "gradient", gradient: randomGradient(colorFn, rng) };
-  return { type: "color", color: colorFn(rng) };
+type RT = {
+  darkThemeChance: number; gradientChance: number; threeStopChance: number;
+  darkL: [number,number]; darkS: [number,number];
+  vividL: [number,number]; vividS: [number,number];
+  lightBgL: [number,number]; lightBgS: [number,number];
+  darkBgL: [number,number]; darkBgS: [number,number];
+  shimmerL: [number,number]; shimmerS: [number,number];
+  scaleRange: [number,number]; layerRange: [number,number];
+  opDark: [number,number]; opLight: [number,number];
+  maskTypes: QrOverlayMask["type"][]; stripeAngles: number[];
+  dotFigures: string[]; dotIcons: string[]; dotIconChance: number;
+  innerEye: string[]; outerEye: string[];
+};
+
+function resolveT(t?: RandomizeTuning): RT {
+  const c = t?.colors; const o = t?.overlays; const s = t?.shapes;
+  return {
+    darkThemeChance:  t?.darkThemeChance    ?? 0.45,
+    gradientChance:   t?.gradientChance     ?? 0.60,
+    threeStopChance:  t?.threeStopChance    ?? 0.45,
+    darkL:    c?.darkLightness     ?? [10, 32],
+    darkS:    c?.darkSaturation    ?? [85, 100],
+    vividL:   c?.vividLightness    ?? [62, 88],
+    vividS:   c?.vividSaturation   ?? [80, 100],
+    lightBgL: c?.lightBgLightness  ?? [92, 98],
+    lightBgS: c?.lightBgSaturation ?? [10, 45],
+    darkBgL:  c?.darkBgLightness   ?? [4, 14],
+    darkBgS:  c?.darkBgSaturation  ?? [40, 85],
+    shimmerL: c?.shimmerLightness  ?? [88, 98],
+    shimmerS: c?.shimmerSaturation ?? [0, 20],
+    scaleRange:  o?.scaleRange      ?? [0.7, 2.5],
+    layerRange:  o?.layerCountRange ?? [1, 2],
+    opDark:   o?.opacityDark       ?? [0.12, 0.40],
+    opLight:  o?.opacityLight      ?? [0.35, 0.85],
+    maskTypes:    (o?.maskTypes    ?? ["stripe", "zigzag", "wave", "checker"]) as QrOverlayMask["type"][],
+    stripeAngles:  o?.stripeAngles ?? [0, 30, 45, 60, 90, 120, 135, 150],
+    dotFigures: s?.dotFigures  ?? [...DOT_FIGURE_SHAPES],
+    dotIcons:   s?.dotIcons    ?? [...DOT_ICON_SHAPES],
+    dotIconChance: s?.dotIconChance ?? 0.5,
+    innerEye: s?.innerEye ?? [...INNER_EYE_SHAPES],
+    outerEye: s?.outerEye ?? [...OUTER_EYE_SHAPES],
+  };
 }
 
-function randomMask(rng: () => number): QrOverlayMask {
-  const type = pick(MASK_TYPES, rng);
-  const scale = 2 + rng() * 4; // 2–6 modules
-  if (type === "stripe") return { type, scale, angle: Math.floor(rng() * 180) };
-  return { type, scale } as QrOverlayMask;
-}
+// ── Generator factory — all random functions bound to a resolved tuning ───────
 
-/** Generates 1–2 masked overlay layers (no base layer). Used when a base fill already exists. */
-function randomMaskLayers(rng: () => number): QrOverlay[] {
-  const count = 1 + Math.floor(rng() * 2); // 1 or 2
-  return Array.from({ length: count }, () => ({
-    fill: randomLayerFill(randomDarkColor, rng),
-    mask: randomMask(rng),
-    opacity: 0.4 + rng() * 0.55,
-  }));
-}
+const GRAD_ROTATIONS = [0, 45, 90, 135, 180, 225, 270, 315] as const;
 
-/** Generates 1–2 stacked overlay layers for a dots/eye part (base + optional mask). */
-function randomOverlays(rng: () => number): QrOverlay[] {
-  const layerCount = rng() < 0.5 ? 1 : 2;
-  return Array.from({ length: layerCount }, (_, i) => ({
-    fill: randomLayerFill(randomDarkColor, rng),
-    mask: i === 0 ? undefined : randomMask(rng),
-    opacity: i === 0 ? 1 : 0.5 + rng() * 0.5,
-  }));
+function makeGen(tc: RT) {
+  const ri = (lo: number, hi: number, rng: () => number) =>
+    lo + Math.floor(rng() * (hi - lo + 1));
+
+  // Returns a color-generator function for the given HSL [L, S] ranges
+  const mkC =
+    ([lLo, lHi]: [number, number], [sLo, sHi]: [number, number]) =>
+    (rng: () => number) =>
+      hslToHex(Math.floor(rng() * 360), ri(sLo, sHi, rng), ri(lLo, lHi, rng));
+
+  const darkC   = mkC(tc.darkL,    tc.darkS);
+  const vividC  = mkC(tc.vividL,   tc.vividS);
+  const pastelC = mkC(tc.lightBgL, tc.lightBgS);
+  const deepC   = mkC(tc.darkBgL,  tc.darkBgS);
+  const shimC   = mkC(tc.shimmerL, tc.shimmerS);
+
+  function grad(colorFn: (rng: () => number) => string, rng: () => number): Gradient {
+    const isLinear = rng() < 0.55;
+    const stops = rng() < tc.threeStopChance
+      ? [
+          { offset: "0%",   color: colorFn(rng) },
+          { offset: "50%",  color: colorFn(rng) },
+          { offset: "100%", color: colorFn(rng) },
+        ]
+      : [
+          { offset: "0%",   color: colorFn(rng) },
+          { offset: "100%", color: colorFn(rng) },
+        ];
+    return {
+      type: isLinear ? "linear" : "radial",
+      ...(isLinear ? { rotation: pick(GRAD_ROTATIONS, rng) } : {}),
+      colorStops: stops,
+    };
+  }
+
+  function layerFill(colorFn: (rng: () => number) => string, rng: () => number): QrLayerFill {
+    if (rng() < tc.gradientChance) return { type: "gradient", gradient: grad(colorFn, rng) };
+    return { type: "color", color: colorFn(rng) };
+  }
+
+  // Solid-or-gradient fill for a QR part (dots / eyes)
+  function partFill(isDark: boolean, rng: () => number): Pick<QrPartOptions, "color" | "gradient"> {
+    const colorFn = isDark ? vividC : darkC;
+    if (rng() < tc.gradientChance) return { gradient: grad(colorFn, rng), color: undefined };
+    return { color: colorFn(rng), gradient: undefined };
+  }
+
+  // Solid-or-gradient fill for the background
+  function bgFill(isDark: boolean, rng: () => number): Pick<Required<Options>["backgroundOptions"], "color" | "gradient"> {
+    const colorFn = isDark ? deepC : pastelC;
+    if (rng() < 0.55) return { gradient: grad(colorFn, rng), color: undefined };
+    return { color: colorFn(rng), gradient: undefined };
+  }
+
+  function mask(rng: () => number): QrOverlayMask {
+    const type = pick(tc.maskTypes, rng);
+    const [scMin, scMax] = tc.scaleRange;
+    const scale = scMin + rng() * (scMax - scMin);
+    const angles = tc.stripeAngles as number[];
+    if (type === "stripe") return { type, scale, angle: pick(angles, rng) };
+    return { type, scale } as QrOverlayMask;
+  }
+
+  // Mask accent layers — shimmer on dark base, dark texture on light base
+  function maskLayers(isDark: boolean, rng: () => number): QrOverlay[] {
+    const [lcMin, lcMax] = tc.layerRange;
+    const count = lcMin + Math.floor(rng() * (lcMax - lcMin + 1));
+    const [opMin, opMax] = isDark ? tc.opDark : tc.opLight;
+    return Array.from({ length: count }, () => ({
+      fill: isDark
+        ? { type: "color" as const, color: shimC(rng) }
+        : layerFill(darkC, rng),
+      mask: mask(rng),
+      opacity: opMin + rng() * (opMax - opMin),
+    }));
+  }
+
+  // Complete overlay set: base fill + optional mask layer
+  function overlays(isDark: boolean, rng: () => number): QrOverlay[] {
+    const layerCount = rng() < 0.5 ? 1 : 2;
+    const colorFn = isDark ? vividC : darkC;
+    return Array.from({ length: layerCount }, (_, i) => ({
+      fill: layerFill(colorFn, rng),
+      mask: i === 0 ? undefined : mask(rng),
+      opacity: i === 0 ? 1 : (isDark ? 0.18 + rng() * 0.32 : 0.4 + rng() * 0.5),
+    }));
+  }
+
+  return {
+    darkC,
+    vividC,
+    partFill,
+    bgFill,
+    layerFill,
+    maskLayers,
+    overlays,
+    dotShape: (rng: () => number) =>
+      rng() < tc.dotIconChance
+        ? { type: "icon" as const, path: pick(tc.dotIcons, rng) as string }
+        : { type: "figure" as const, path: pick(tc.dotFigures, rng) as string },
+    innerEyeShape: (rng: () => number) => ({ type: "icon" as const, path: pick(tc.innerEye, rng) as string }),
+    outerEyeShape: (rng: () => number) => ({ type: "icon" as const, path: pick(tc.outerEye, rng) as string }),
+  };
 }
 
 const DECORATION_SHAPES: QrDecorationBuiltinShape[] = [
@@ -234,11 +352,13 @@ const DECORATION_PLACEMENTS: QrDecorationPlacement[] = [
  * Returns a new `Options` object with selected fields replaced by random values.
  *
  * Color flags (`dotsColor`, `backgroundColor`, …) randomly produce either a
- * solid color **or** a linear gradient (~40 % chance) — no separate flag needed.
+ * solid color **or** a gradient (~60 % chance, including 3-stop variants) —
+ * no separate flag needed.
  *
- * All generated colors are contrast-aware by design: dot/eye colors are dark
- * (L 8–15 %), background colors are light (L 85–97 %), guaranteeing a WCAG
- * contrast ratio ≥ 7:1 so every result is scannable without a validation loop.
+ * When `backgroundColor` is included in `config`, the generator picks a
+ * light or dark theme (~45 % dark). Dark themes pair a deep rich background
+ * with vivid bright dots; light themes pair a pastel background with deep
+ * saturated dots. All combinations are contrast-aware and scannable.
  *
  * @param base   — Starting options; untouched fields are preserved as-is.
  * @param config — Flags that control which fields are randomised.
@@ -249,24 +369,28 @@ export function randomizeOptions(
   base: Options,
   config: RandomizeConfig,
   seed?: number,
+  tuning?: RandomizeTuning,
 ): Options {
   const rng = mulberry32(seed ?? (Date.now() & 0xffffffff));
   const result: Options = { ...base };
+  const tc = resolveT(tuning);
+  const gen = makeGen(tc);
+
+  const isDark = !!config.backgroundColor && rng() < tc.darkThemeChance;
 
   // Resolve deprecated aliases so the rest of the function only checks the canonical names.
-  const dotsOv    = config.dotsOverlays    ?? config.dotsPattern    ?? false;
-  const dotsDotOv = config.cornersDotOverlays ?? config.cornersDotPattern ?? false;
+  const dotsOv    = config.dotsOverlays       ?? config.dotsPattern        ?? false;
+  const dotsDotOv = config.cornersDotOverlays ?? config.cornersDotPattern   ?? false;
   const sqOv      = config.cornersSquareOverlays ?? config.cornersSquarePattern ?? false;
 
-  // Builds the overlay array for a part.
-  // combined=true: color/gradient is layer 0, mask layers follow (dotsColor + dotsOverlays).
-  // combined=false: full independent overlay set (dotsOverlays alone).
+  // combined=true: base fill becomes overlay layer 0, mask layers stack on top.
+  // combined=false: full independent overlay set (base + optional mask).
   function buildOverlays(combined: boolean): QrOverlay[] {
     if (combined) {
-      const baseFill = randomLayerFill(randomDarkColor, rng);
-      return [{ fill: baseFill }, ...randomMaskLayers(rng)];
+      const colorFn = isDark ? gen.vividC : gen.darkC;
+      return [{ fill: gen.layerFill(colorFn, rng) }, ...gen.maskLayers(isDark, rng)];
     }
-    return randomOverlays(rng);
+    return gen.overlays(isDark, rng);
   }
 
   // --- dots ---
@@ -277,14 +401,11 @@ export function randomizeOptions(
       result.dotsOptions.color = undefined;
       result.dotsOptions.gradient = undefined;
     } else if (config.dotsColor) {
-      Object.assign(result.dotsOptions, randomDarkFill(rng));
+      Object.assign(result.dotsOptions, gen.partFill(isDark, rng));
       result.dotsOptions.overlays = undefined;
     }
     if (config.dotsShape) {
-      result.dotsOptions.shape =
-        rng() > 0.5
-          ? { type: "icon", path: pick(DOT_ICON_SHAPES, rng) }
-          : { type: "figure", path: pick(DOT_FIGURE_SHAPES, rng) };
+      result.dotsOptions.shape = gen.dotShape(rng) as QrShape;
     }
   }
 
@@ -296,11 +417,11 @@ export function randomizeOptions(
       result.cornersDotOptions.color = undefined;
       result.cornersDotOptions.gradient = undefined;
     } else if (config.cornersDotColor) {
-      Object.assign(result.cornersDotOptions, randomDarkFill(rng));
+      Object.assign(result.cornersDotOptions, gen.partFill(isDark, rng));
       result.cornersDotOptions.overlays = undefined;
     }
     if (config.cornersDotShape) {
-      result.cornersDotOptions.shape = { type: "icon", path: pick(INNER_EYE_SHAPES, rng) };
+      result.cornersDotOptions.shape = gen.innerEyeShape(rng) as QrShape;
     }
   }
 
@@ -312,11 +433,11 @@ export function randomizeOptions(
       result.cornersSquareOptions.color = undefined;
       result.cornersSquareOptions.gradient = undefined;
     } else if (config.cornersSquareColor) {
-      Object.assign(result.cornersSquareOptions, randomDarkFill(rng));
+      Object.assign(result.cornersSquareOptions, gen.partFill(isDark, rng));
       result.cornersSquareOptions.overlays = undefined;
     }
     if (config.cornersSquareShape) {
-      result.cornersSquareOptions.shape = { type: "icon", path: pick(OUTER_EYE_SHAPES, rng) };
+      result.cornersSquareOptions.shape = gen.outerEyeShape(rng) as QrShape;
     }
   }
 
@@ -324,7 +445,7 @@ export function randomizeOptions(
   if (config.backgroundColor) {
     result.backgroundOptions = {
       ...base.backgroundOptions,
-      ...randomLightFill(rng),
+      ...gen.bgFill(isDark, rng),
     };
   }
 
@@ -335,13 +456,13 @@ export function randomizeOptions(
 
   // --- decorations ---
   if (config.decorations) {
-    const layerCount = 1 + Math.floor(rng() * 2); // 1 or 2 layers
+    const layerCount = 1 + Math.floor(rng() * 2);
     result.decorations = Array.from({ length: layerCount }, (_, i) => ({
       shape: pick(DECORATION_SHAPES, rng),
-      color: randomDarkColor(rng),
+      color: gen.darkC(rng),
       placement: pick(DECORATION_PLACEMENTS, rng),
-      size: 0.3 + rng() * 0.5,            // 0.3–0.8 modules
-      opacity: 0.3 + rng() * 0.6,         // 0.3–0.9
+      size: 0.3 + rng() * 0.5,
+      opacity: 0.3 + rng() * 0.6,
       seed: Math.floor(rng() * 0xffff) ^ (i * 0x9e3779b9),
     }));
   }
@@ -351,10 +472,14 @@ export function randomizeOptions(
 
 // ─── normalizeOptions ─────────────────────────────────────────────────────────
 
-function _hexToRgb(hex: string): [number, number, number] {
-  if (!hex.startsWith("#") || hex.length < 7) return [0, 0, 0];
-  const n = parseInt(hex.slice(1, 7), 16);
-  return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+function _hexToRgb(color: string): [number, number, number] {
+  if (color.startsWith("#") && color.length >= 7) {
+    const n = parseInt(color.slice(1, 7), 16);
+    return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+  }
+  const m = color.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (m) return [parseInt(m[1]), parseInt(m[2]), parseInt(m[3])];
+  return [0, 0, 0];
 }
 
 function _srgbLinear(c: number): number {
@@ -408,7 +533,6 @@ function _hslLum(h: number, s: number, l: number): number {
  * makeDarker = false → increase L (inverted QR — dots on dark background)
  */
 function _adjustColor(color: string, bgLum: number, minRatio: number, makeDarker: boolean): string {
-  if (!color.startsWith("#")) return color;
   const [r, g, b] = _hexToRgb(color);
   if (_wcag(_rgbLum(r, g, b), bgLum) >= minRatio) return color;
 
@@ -480,16 +604,38 @@ function _adjustPart(
   if (!part) return part;
   const result: QrPartOptions = { ...part };
   if (part.overlays?.length) {
-    // Only adjust full-coverage base layers — masked decorative layers don't affect readability
-    result.overlays = part.overlays.map((o) =>
-      o.mask ? o : { ...o, fill: _adjustFill(o.fill, bgLum, minRatio, darker) },
-    );
+    result.overlays = part.overlays.map((o) => {
+      if (!o.mask) {
+        return { ...o, fill: _adjustFill(o.fill, bgLum, minRatio, darker) };
+      }
+      // High-opacity masked layers can fully obscure the base in their pattern area.
+      // If their color blends into the background, those dot regions become invisible to scanners.
+      const opacity = o.opacity ?? 1;
+      if (opacity >= 0.5) {
+        const lum = o.fill.type === "color" ? _hexLum(o.fill.color) : _gradLum(o.fill.gradient);
+        if (_wcag(lum, bgLum) < minRatio) {
+          return { ...o, fill: _adjustFill(o.fill, bgLum, minRatio, darker) };
+        }
+      }
+      return o;
+    });
   } else if (part.gradient) {
     result.gradient = _adjustGradient(part.gradient, bgLum, minRatio, darker);
   } else if (part.color !== undefined) {
     result.color = _adjustColor(part.color, bgLum, minRatio, darker);
   }
   return result;
+}
+
+function _hasProblematicMaskedLayer(part: QrPartOptions | undefined, bgLum: number, minRatio: number): boolean {
+  if (!part?.overlays?.length) return false;
+  return part.overlays.some((o) => {
+    if (!o.mask) return false;
+    const opacity = o.opacity ?? 1;
+    if (opacity < 0.5) return false;
+    const lum = o.fill.type === "color" ? _hexLum(o.fill.color) : _gradLum(o.fill.gradient);
+    return _wcag(lum, bgLum) < minRatio;
+  });
 }
 
 /**
@@ -513,12 +659,14 @@ function _adjustPart(
 export function normalizeOptions(base: Options, minContrast = 3.0): Options {
   const bgLum = _bgLum(base);
   const dotsLum = _partLum(base.dotsOptions) ?? 0;
-
-  if (_wcag(dotsLum, bgLum) >= minContrast) return base;
-
-  // Standard: dark dots on light background → darken dots
-  // Inverted: light dots on dark background → lighten dots
   const darkenDots = dotsLum <= bgLum;
+
+  if (
+    _wcag(dotsLum, bgLum) >= minContrast &&
+    !_hasProblematicMaskedLayer(base.dotsOptions, bgLum, minContrast) &&
+    !_hasProblematicMaskedLayer(base.cornersSquareOptions, bgLum, minContrast) &&
+    !_hasProblematicMaskedLayer(base.cornersDotOptions, bgLum, minContrast)
+  ) return base;
 
   return {
     ...base,
