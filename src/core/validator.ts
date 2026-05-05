@@ -12,6 +12,11 @@ const MIN_CONTRAST_RATIO = 3.0;
 // Inner sampling inset: 20% on each side → use middle 60% of module to avoid
 // anti-aliasing and shape-dependent pixel bleeding at edges
 const SAMPLE_PAD = 0.2;
+// Finder patterns with custom shapes (extra-rounded, classy, etc.) always have
+// some corner modules that render as background. Allow up to 10% degradation
+// before treating finder patterns as broken (12/147 ≈ 8.2% for typical
+// extra-rounded outer-eye with 4 empty corners per pattern × 3 patterns).
+const FINDER_DEGRADED_THRESHOLD = 0.10;
 
 function srgbToLinear(c: number): number {
   const n = c / 255;
@@ -181,7 +186,8 @@ export function validateQRCanvas(
     }
   }
 
-  const finderPatternsOk = degradedFinder === 0;
+  const finderDegradedPct = totalFinderModules > 0 ? degradedFinder / totalFinderModules : 0;
+  const finderPatternsOk = finderDegradedPct < FINDER_DEGRADED_THRESHOLD;
   const timingPatternsOk = degradedTiming === 0;
 
   const capacity = ECL_CAPACITY[ecl] ?? 0.30;
