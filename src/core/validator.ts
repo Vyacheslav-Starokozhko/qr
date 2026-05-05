@@ -146,6 +146,13 @@ export function validateQRCanvas(
   // Support inverted QR (light dots on dark background)
   const inverted = meanDark > meanLight;
 
+  // Deadband around the threshold — modules with luminance in this zone are
+  // "uncertain" and not counted as degraded. Prevents false positives from
+  // custom shapes (rounded corners, classy dots, etc.) that only partially
+  // fill their module's bounding box, pushing their average luminance toward
+  // the midpoint even though the module is correctly rendered.
+  const deadband = Math.abs(meanLight - meanDark) * 0.2;
+
   // --- Pass 3: classify degraded modules per structural zone ---
   let degradedFinder = 0, totalFinderModules = 0;
   let degradedTiming = 0, totalTimingModules = 0;
@@ -155,8 +162,11 @@ export function validateQRCanvas(
     for (let x = 0; x < matrixSize; x++) {
       const { isDark } = matrix[y][x];
       const lum = luminances[y][x];
-      const apparentlyDark = inverted ? lum > threshold : lum < threshold;
-      const degraded = apparentlyDark !== isDark;
+      // A module is only "apparently light/dark" when it's confidently past the
+      // threshold; anything within the deadband is treated as correct.
+      const confidentlyLight = inverted ? lum < threshold - deadband : lum > threshold + deadband;
+      const confidentlyDark  = inverted ? lum > threshold + deadband : lum < threshold - deadband;
+      const degraded = isDark ? confidentlyLight : confidentlyDark;
 
       if (isFinderModule(x, y, matrixSize)) {
         totalFinderModules++;

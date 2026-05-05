@@ -236,18 +236,6 @@ export type QrFrame = {
   labels?: QrLabel[];
 };
 
-// QR Scan result returned by the scan() method on QRGenerateResult
-export type QRScanState = {
-  /** Whether the scan operation is still in progress */
-  inProgress: boolean;
-  /** true when a QR code was successfully decoded */
-  result: boolean;
-  /** Non-empty string when an error occurred */
-  error: string;
-  /** The decoded QR data string, or null if scan failed */
-  data: string | null;
-};
-
 /**
  * Result of pixel-based QR validation via {@link QRGenerateResult.validate}.
  * Validates by sampling the rendered canvas against the known source matrix —

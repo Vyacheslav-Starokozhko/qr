@@ -1,4 +1,3 @@
-import jsQR from "jsqr";
 import { QRAnalyzer } from "./core/analyzer";
 import { validateQRCanvas } from "./core/validator";
 import { QRShapes, shapes } from "./renderer/icons";
@@ -11,7 +10,6 @@ import {
   QrImage,
   QrImagePosition,
   Gradient,
-  QRScanState,
   QRValidateResult,
   QrDecoration,
   QrDecorationBuiltinShape,
@@ -557,67 +555,62 @@ function getEyeOrigin(
   return null;
 }
 
-// --- jsQR ---
+// --- validateQR ---
 
 /**
- * Scans an SVG string or an existing HTMLCanvasElement for a QR code.
+ * Validates a rendered QR SVG against the source options.
  *
- * - **SVG string**: rendered to an off-screen canvas using the dimensions
- *   embedded in the SVG `width`/`height` attributes (fallback 1000×1000).
- * - **HTMLCanvasElement**: read directly via `getImageData`.
+ * Renders the SVG to an off-screen canvas, then samples every module against
+ * the expected QR matrix (derived from `options.data` and ECL) to detect
+ * contrast problems, degraded finder/timing patterns, and ECC headroom.
  *
- * The returned {@link QRScanState} always settles (`inProgress: false`).
- * Errors are surfaced through the `error` field rather than thrown.
+ * Requires a browser environment (uses `document` + Canvas API).
  *
- * @example
- * const { svg } = await QRCodeGenerate({ data: "https://example.com" });
- * const { result, data, error } = await scanQR(svg);
+ * @param svg     — SVG string produced by {@link QRCodeGenerate}.
+ * @param options — The same options object used to generate the SVG.
  */
-export async function scanQR(
-  context: string | HTMLCanvasElement,
-): Promise<QRScanState> {
-  try {
-    let canvas: HTMLCanvasElement;
+export async function validateQR(
+  svg: string,
+  options: Options,
+): Promise<QRValidateResult> {
+  const fail = (msg: string): QRValidateResult => ({
+    valid: false,
+    contrastRatio: 1,
+    degradedModules: 0,
+    totalModules: 0,
+    finderPatternsOk: false,
+    timingPatternsOk: false,
+    eccHeadroom: 0,
+    issues: [msg],
+  });
 
-    if (typeof context === "string") {
-      if (typeof document === "undefined") {
-        throw new Error(
-          "scanQR() requires a browser environment (document is not defined)",
-        );
-      }
-      const wMatch = context.match(/\bwidth="([\d.]+)"/);
-      const hMatch = context.match(/\bheight="([\d.]+)"/);
-      const w = wMatch ? parseFloat(wMatch[1]) : 1000;
-      const h = hMatch ? parseFloat(hMatch[1]) : 1000;
-      canvas = (await svgToCanvas(context, w, h)) as HTMLCanvasElement;
-    } else {
-      canvas = context;
-    }
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Could not get 2D context from canvas");
-
-    const { width, height } = canvas;
-    const imageData = ctx.getImageData(0, 0, width, height);
-    const code = jsQR(imageData.data, width, height);
-
-    if (code) {
-      return { inProgress: false, result: true, error: "", data: code.data };
-    }
-    return {
-      inProgress: false,
-      result: false,
-      error: "No QR code found in the image",
-      data: null,
-    };
-  } catch (err) {
-    return {
-      inProgress: false,
-      result: false,
-      error: err instanceof Error ? err.message : String(err),
-      data: null,
-    };
+  if (typeof document === "undefined") {
+    return fail("validateQR() requires a browser environment");
   }
+
+  const config = { ...defaultOptions, ...options };
+  const ecl = config.qrOptions?.errorCorrectionLevel ?? "H";
+  const matrix = new QRAnalyzer(config.data ?? "", ecl).getMatrix();
+  const matrixSize = matrix.length;
+
+  const margin = ((config.margin ?? 10) / 100) * matrixSize;
+  const clampedBR = config.borderRadius != null ? Math.max(0, Math.min(100, config.borderRadius)) : 0;
+  const _brForMargin = config.wrapper?.shape === "circle" || config.wrapper?.shape == null
+    ? config.wrapper ? 100 : clampedBR
+    : clampedBR;
+  const _k = (_brForMargin / 100) * (1 - 1 / Math.SQRT2);
+  const minSafeMargin = _k > 0 && _k < 1 ? (_k * matrixSize) / (2 * (1 - _k)) : 0;
+  const effectiveMargin = Math.max(margin, minSafeMargin);
+
+  const wMatch = svg.match(/\bwidth="([\d.]+)"/);
+  const hMatch = svg.match(/\bheight="([\d.]+)"/);
+  const w = wMatch ? parseFloat(wMatch[1]) : config.width ?? 1000;
+  const h = hMatch ? parseFloat(hMatch[1]) : config.height ?? 1000;
+
+  const canvas = await svgToCanvas(svg, w, h);
+  if (!canvas) return fail("validateQR() requires a browser environment (canvas is null)");
+
+  return validateQRCanvas(canvas, matrix, effectiveMargin, ecl);
 }
 
 // --- Main Function ---
