@@ -237,6 +237,29 @@ export type QrFrame = {
 };
 
 /**
+ * Fine-grained tuning for {@link validateQR} and {@link QRGenerateResult.validate}.
+ * Every field is optional — omitted values fall back to the built-in defaults.
+ */
+export type ValidatorTuning = {
+  /** Minimum WCAG contrast ratio between mean dark and light module luminance.
+   *  Default 2.0. QR scanners reliably read at 2:1; raise for stricter checking. */
+  minContrast?: number;
+  /** Maximum fraction (0–1) of finder-pattern modules allowed to render as the
+   *  wrong color before flagging. Default 0.25. Custom eye shapes (circle, star,
+   *  heart) leave corner/edge modules as background — 0.25 accepts all standard
+   *  decorative shapes while still catching truly broken patterns. */
+  finderDegradedThreshold?: number;
+  /** Inner sampling inset as fraction of module width/height (0–0.49).
+   *  Larger values sample only the center, reducing anti-aliasing noise.
+   *  Default 0.2 (middle 60 % of each module). */
+  samplePad?: number;
+  /** Deadband around the adaptive threshold as fraction of the full luminance
+   *  range. Modules within this zone are treated as correct, preventing false
+   *  positives from partially-filled custom shapes. Default 0.2. */
+  deadbandFraction?: number;
+};
+
+/**
  * Result of pixel-based QR validation via {@link QRGenerateResult.validate}.
  * Validates by sampling the rendered canvas against the known source matrix —
  * works correctly with all dot shapes, gradients, and inverted color schemes.

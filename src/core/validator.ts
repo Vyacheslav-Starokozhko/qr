@@ -1,4 +1,4 @@
-import { QRMatrix, QRValidateResult } from "../types";
+import { QRMatrix, QRValidateResult, ValidatorTuning } from "../types";
 
 const ECL_CAPACITY: Record<string, number> = {
   L: 0.07,
@@ -8,20 +8,6 @@ const ECL_CAPACITY: Record<string, number> = {
 };
 
 const FINDER_SIZE = 7;
-// QR scanners operate reliably well below the WCAG 3.0 text-accessibility
-// threshold. 2.5:1 still catches genuinely unreadable QR codes while accepting
-// gradient/overlay combinations whose canvas-sampled average dips slightly
-// below what a pure-color calculation would give.
-const MIN_CONTRAST_RATIO = 2.5;
-// Inner sampling inset: 20% on each side → use middle 60% of module to avoid
-// anti-aliasing and shape-dependent pixel bleeding at edges
-const SAMPLE_PAD = 0.2;
-// Custom outer-eye shapes (circle, star, heart, extra-rounded) can leave many
-// modules in the 7×7 finder zone rendering as background. A circle frame
-// produces ~8 empty modules per pattern × 3 = 24 out of 147 (≈16%).
-// 25% tolerance accepts all standard decorative shapes while still flagging
-// truly broken patterns where half the finder area is wrong.
-const FINDER_DEGRADED_THRESHOLD = 0.25;
 
 function srgbToLinear(c: number): number {
   const n = c / 255;
@@ -30,7 +16,6 @@ function srgbToLinear(c: number): number {
 
 function rgbaLuminance(r: number, g: number, b: number, a: number): number {
   const af = a / 255;
-  // Composite over white background for transparent pixels
   const rr = r * af + 255 * (1 - af);
   const gg = g * af + 255 * (1 - af);
   const bb = b * af + 255 * (1 - af);
@@ -49,14 +34,14 @@ function sampleRegion(
   y: number,
   mw: number,
   mh: number,
+  pad: number,
 ): number {
-  const x0 = Math.max(0, Math.ceil(x + mw * SAMPLE_PAD));
-  const y0 = Math.max(0, Math.ceil(y + mh * SAMPLE_PAD));
-  const x1 = Math.min(cw, Math.floor(x + mw * (1 - SAMPLE_PAD)));
-  const y1 = Math.min(ch, Math.floor(y + mh * (1 - SAMPLE_PAD)));
+  const x0 = Math.max(0, Math.ceil(x + mw * pad));
+  const y0 = Math.max(0, Math.ceil(y + mh * pad));
+  const x1 = Math.min(cw, Math.floor(x + mw * (1 - pad)));
+  const y1 = Math.min(ch, Math.floor(y + mh * (1 - pad)));
 
   if (x1 <= x0 || y1 <= y0) {
-    // Fallback: single center pixel when module is sub-pixel sized
     const cx = Math.min(cw - 1, Math.round(x + mw / 2));
     const cy = Math.min(ch - 1, Math.round(y + mh / 2));
     const idx = (cy * cw + cx) * 4;
@@ -97,7 +82,13 @@ export function validateQRCanvas(
   matrix: QRMatrix,
   effectiveMargin: number,
   ecl: string,
+  tuning?: ValidatorTuning,
 ): QRValidateResult {
+  const minContrast            = tuning?.minContrast            ?? 2.0;
+  const finderDegradedThreshold = tuning?.finderDegradedThreshold ?? 0.25;
+  const samplePad              = tuning?.samplePad              ?? 0.2;
+  const deadbandFraction       = tuning?.deadbandFraction       ?? 0.2;
+
   const ctx = canvas.getContext("2d");
   if (!ctx) {
     return {
@@ -128,11 +119,11 @@ export function validateQRCanvas(
     for (let x = 0; x < matrixSize; x++) {
       const px = (effectiveMargin + x) * scaleX;
       const py = (effectiveMargin + y) * scaleY;
-      luminances[y][x] = sampleRegion(data, cw, ch, px, py, scaleX, scaleY);
+      luminances[y][x] = sampleRegion(data, cw, ch, px, py, scaleX, scaleY, samplePad);
     }
   }
 
-  // --- Pass 2: compute mean luminance per expected group (dark vs light) ---
+  // --- Pass 2: mean luminance per expected group (dark vs light) ---
   let sumDark = 0, countDark = 0;
   let sumLight = 0, countLight = 0;
   for (let y = 0; y < matrixSize; y++) {
@@ -142,38 +133,26 @@ export function validateQRCanvas(
       else { sumLight += lum; countLight++; }
     }
   }
-  const meanDark = countDark > 0 ? sumDark / countDark : 0;
+  const meanDark  = countDark  > 0 ? sumDark  / countDark  : 0;
   const meanLight = countLight > 0 ? sumLight / countLight : 1;
 
-  // WCAG relative contrast ratio
   const L1 = Math.max(meanDark, meanLight);
   const L2 = Math.min(meanDark, meanLight);
   const contrastRatio = (L1 + 0.05) / (L2 + 0.05);
 
-  // Adaptive threshold: midpoint between the two cluster means
   const threshold = (meanDark + meanLight) / 2;
-
-  // Support inverted QR (light dots on dark background)
-  const inverted = meanDark > meanLight;
-
-  // Deadband around the threshold — modules with luminance in this zone are
-  // "uncertain" and not counted as degraded. Prevents false positives from
-  // custom shapes (rounded corners, classy dots, etc.) that only partially
-  // fill their module's bounding box, pushing their average luminance toward
-  // the midpoint even though the module is correctly rendered.
-  const deadband = Math.abs(meanLight - meanDark) * 0.2;
+  const inverted  = meanDark > meanLight;
+  const deadband  = Math.abs(meanLight - meanDark) * deadbandFraction;
 
   // --- Pass 3: classify degraded modules per structural zone ---
   let degradedFinder = 0, totalFinderModules = 0;
   let degradedTiming = 0, totalTimingModules = 0;
-  let degradedData = 0, totalDataModules = 0;
+  let degradedData   = 0, totalDataModules   = 0;
 
   for (let y = 0; y < matrixSize; y++) {
     for (let x = 0; x < matrixSize; x++) {
       const { isDark } = matrix[y][x];
       const lum = luminances[y][x];
-      // A module is only "apparently light/dark" when it's confidently past the
-      // threshold; anything within the deadband is treated as correct.
       const confidentlyLight = inverted ? lum < threshold - deadband : lum > threshold + deadband;
       const confidentlyDark  = inverted ? lum > threshold + deadband : lum < threshold - deadband;
       const degraded = isDark ? confidentlyLight : confidentlyDark;
@@ -192,20 +171,20 @@ export function validateQRCanvas(
   }
 
   const finderDegradedPct = totalFinderModules > 0 ? degradedFinder / totalFinderModules : 0;
-  const finderPatternsOk = finderDegradedPct < FINDER_DEGRADED_THRESHOLD;
-  const timingPatternsOk = degradedTiming === 0;
+  const finderPatternsOk  = finderDegradedPct < finderDegradedThreshold;
+  const timingPatternsOk  = degradedTiming === 0;
 
-  const capacity = ECL_CAPACITY[ecl] ?? 0.30;
+  const capacity           = ECL_CAPACITY[ecl] ?? 0.30;
   const eccToleranceModules = Math.max(1, Math.floor(capacity * totalDataModules));
-  const eccHeadroom = Math.max(0, 1 - degradedData / eccToleranceModules);
+  const eccHeadroom        = Math.max(0, 1 - degradedData / eccToleranceModules);
 
-  const totalModules = totalFinderModules + totalTimingModules + totalDataModules;
-  const degradedModules = degradedFinder + degradedTiming + degradedData;
+  const totalModules    = totalFinderModules + totalTimingModules + totalDataModules;
+  const degradedModules = degradedFinder     + degradedTiming     + degradedData;
 
   const issues: string[] = [];
-  if (contrastRatio < MIN_CONTRAST_RATIO) {
+  if (contrastRatio < minContrast) {
     issues.push(
-      `Low contrast: ${contrastRatio.toFixed(1)}:1 (minimum ${MIN_CONTRAST_RATIO.toFixed(1)}:1 required)`,
+      `Low contrast: ${contrastRatio.toFixed(1)}:1 (minimum ${minContrast.toFixed(1)}:1 required)`,
     );
   }
   if (!finderPatternsOk) {
@@ -226,7 +205,7 @@ export function validateQRCanvas(
   }
 
   const valid =
-    contrastRatio >= MIN_CONTRAST_RATIO &&
+    contrastRatio >= minContrast &&
     finderPatternsOk &&
     timingPatternsOk &&
     degradedData <= eccToleranceModules;

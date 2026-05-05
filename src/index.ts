@@ -11,6 +11,7 @@ import {
   QrImagePosition,
   Gradient,
   QRValidateResult,
+  ValidatorTuning,
   QrDecoration,
   QrDecorationBuiltinShape,
   QrWrapperShape,
@@ -572,6 +573,7 @@ function getEyeOrigin(
 export async function validateQR(
   svg: string,
   options: Options,
+  tuning?: ValidatorTuning,
 ): Promise<QRValidateResult> {
   const fail = (msg: string): QRValidateResult => ({
     valid: false,
@@ -610,7 +612,7 @@ export async function validateQR(
   const canvas = await svgToCanvas(svg, w, h);
   if (!canvas) return fail("validateQR() requires a browser environment (canvas is null)");
 
-  return validateQRCanvas(canvas, matrix, effectiveMargin, ecl);
+  return validateQRCanvas(canvas, matrix, effectiveMargin, ecl, tuning);
 }
 
 // --- Main Function ---
@@ -648,7 +650,7 @@ export interface QRGenerateResult extends QRGenerateResultBase {
    * ECC headroom. Works with all dot shapes and color schemes.
    * Returns an error result when called in a non-browser environment.
    */
-  validate: () => QRValidateResult;
+  validate: (tuning?: ValidatorTuning) => QRValidateResult;
 }
 
 async function svgToCanvas(
@@ -1123,7 +1125,7 @@ export async function QRCodeGenerate(
   const finalizeResult = async (svg: string): Promise<QRGenerateResult> => {
     const prefixed = prefixSvgIds(svg, `qr${_uid}-`);
     const canvas = await svgToCanvas(prefixed, w, h);
-    const validate = (): QRValidateResult => {
+    const validate = (tuning?: ValidatorTuning): QRValidateResult => {
       if (!canvas) {
         return {
           valid: false,
@@ -1136,7 +1138,7 @@ export async function QRCodeGenerate(
           issues: ["validate() requires a browser environment (canvas is null)"],
         };
       }
-      return validateQRCanvas(canvas, matrix, effectiveMargin, _ecl);
+      return validateQRCanvas(canvas, matrix, effectiveMargin, _ecl, tuning);
     };
     return { ...base, svg: prefixed, canvas, validate };
   };
