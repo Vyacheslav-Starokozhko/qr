@@ -467,7 +467,7 @@ export function randomizeOptions(
     }));
   }
 
-  return result;
+  return normalizeOptions(result);
 }
 
 // ─── normalizeOptions ─────────────────────────────────────────────────────────
@@ -659,10 +659,15 @@ function _hasProblematicMaskedLayer(part: QrPartOptions | undefined, bgLum: numb
 export function normalizeOptions(base: Options, minContrast = 3.0): Options {
   const bgLum = _bgLum(base);
   const dotsLum = _partLum(base.dotsOptions) ?? 0;
+  const csLum   = _partLum(base.cornersSquareOptions);
+  const cdLum   = _partLum(base.cornersDotOptions);
   const darkenDots = dotsLum <= bgLum;
 
+  const ok = (lum: number | null) =>
+    lum === null || _wcag(lum, bgLum) >= minContrast;
+
   if (
-    _wcag(dotsLum, bgLum) >= minContrast &&
+    ok(dotsLum) && ok(csLum) && ok(cdLum) &&
     !_hasProblematicMaskedLayer(base.dotsOptions, bgLum, minContrast) &&
     !_hasProblematicMaskedLayer(base.cornersSquareOptions, bgLum, minContrast) &&
     !_hasProblematicMaskedLayer(base.cornersDotOptions, bgLum, minContrast)
