@@ -14,25 +14,44 @@ export type RandomizeConfig = {
   dotsColor?: boolean;
   /** Randomize the main QR dots shape */
   dotsShape?: boolean;
+  /**
+   * Add random overlay mask layers (stripe/zigzag/wave/checker) to dots.
+   *
+   * - When combined with `dotsColor`: the random color/gradient becomes the base
+   *   overlay layer and 1–2 mask layers are stacked on top for texture.
+   * - When used alone: generates a full overlay set (base fill + mask layers),
+   *   replacing `color`/`gradient`.
+   */
+  dotsOverlays?: boolean;
   /** Randomize inner eye (ball) color — randomly picks solid color or gradient */
   cornersDotColor?: boolean;
   /** Randomize inner eye (ball) shape */
   cornersDotShape?: boolean;
+  /**
+   * Add random overlay mask layers to inner eyes (cornersDot).
+   * Same combination rules as `dotsOverlays`.
+   */
+  cornersDotOverlays?: boolean;
   /** Randomize outer eye (frame) color — randomly picks solid color or gradient */
   cornersSquareColor?: boolean;
   /** Randomize outer eye (frame) shape */
   cornersSquareShape?: boolean;
+  /**
+   * Add random overlay mask layers to outer eyes (cornersSquare).
+   * Same combination rules as `dotsOverlays`.
+   */
+  cornersSquareOverlays?: boolean;
   /** Randomize background color — randomly picks solid color or gradient */
   backgroundColor?: boolean;
   /** Randomize border radius (0–100) */
   borderRadius?: boolean;
   /** Generate random decoration layers in the QR margin */
   decorations?: boolean;
-  /** Randomize the main QR dots fill pattern (stripe/zigzag/wave/checker) */
+  /** @deprecated Use `dotsOverlays` instead */
   dotsPattern?: boolean;
-  /** Randomize inner eye (ball) fill pattern */
+  /** @deprecated Use `cornersDotOverlays` instead */
   cornersDotPattern?: boolean;
-  /** Randomize outer eye (frame) fill pattern */
+  /** @deprecated Use `cornersSquareOverlays` instead */
   cornersSquarePattern?: boolean;
 };
 
@@ -170,12 +189,21 @@ function randomMask(rng: () => number): QrOverlayMask {
   return { type, scale } as QrOverlayMask;
 }
 
-/** Generates 1–2 stacked overlay layers for a dots/eye part. */
+/** Generates 1–2 masked overlay layers (no base layer). Used when a base fill already exists. */
+function randomMaskLayers(rng: () => number): QrOverlay[] {
+  const count = 1 + Math.floor(rng() * 2); // 1 or 2
+  return Array.from({ length: count }, () => ({
+    fill: randomLayerFill(randomDarkColor, rng),
+    mask: randomMask(rng),
+    opacity: 0.4 + rng() * 0.55,
+  }));
+}
+
+/** Generates 1–2 stacked overlay layers for a dots/eye part (base + optional mask). */
 function randomOverlays(rng: () => number): QrOverlay[] {
   const layerCount = rng() < 0.5 ? 1 : 2;
   return Array.from({ length: layerCount }, (_, i) => ({
     fill: randomLayerFill(randomDarkColor, rng),
-    // First layer: full coverage (base). Additional layers: pattern mask.
     mask: i === 0 ? undefined : randomMask(rng),
     opacity: i === 0 ? 1 : 0.5 + rng() * 0.5,
   }));
@@ -225,11 +253,27 @@ export function randomizeOptions(
   const rng = mulberry32(seed ?? (Date.now() & 0xffffffff));
   const result: Options = { ...base };
 
+  // Resolve deprecated aliases so the rest of the function only checks the canonical names.
+  const dotsOv    = config.dotsOverlays    ?? config.dotsPattern    ?? false;
+  const dotsDotOv = config.cornersDotOverlays ?? config.cornersDotPattern ?? false;
+  const sqOv      = config.cornersSquareOverlays ?? config.cornersSquarePattern ?? false;
+
+  // Builds the overlay array for a part.
+  // combined=true: color/gradient is layer 0, mask layers follow (dotsColor + dotsOverlays).
+  // combined=false: full independent overlay set (dotsOverlays alone).
+  function buildOverlays(combined: boolean): QrOverlay[] {
+    if (combined) {
+      const baseFill = randomLayerFill(randomDarkColor, rng);
+      return [{ fill: baseFill }, ...randomMaskLayers(rng)];
+    }
+    return randomOverlays(rng);
+  }
+
   // --- dots ---
-  if (config.dotsColor || config.dotsShape || config.dotsPattern) {
+  if (config.dotsColor || config.dotsShape || dotsOv) {
     result.dotsOptions = { ...base.dotsOptions };
-    if (config.dotsPattern) {
-      result.dotsOptions.overlays = randomOverlays(rng);
+    if (dotsOv) {
+      result.dotsOptions.overlays = buildOverlays(!!config.dotsColor);
       result.dotsOptions.color = undefined;
       result.dotsOptions.gradient = undefined;
     } else if (config.dotsColor) {
@@ -245,10 +289,10 @@ export function randomizeOptions(
   }
 
   // --- inner eye (cornersDot) ---
-  if (config.cornersDotColor || config.cornersDotShape || config.cornersDotPattern) {
+  if (config.cornersDotColor || config.cornersDotShape || dotsDotOv) {
     result.cornersDotOptions = { ...base.cornersDotOptions };
-    if (config.cornersDotPattern) {
-      result.cornersDotOptions.overlays = randomOverlays(rng);
+    if (dotsDotOv) {
+      result.cornersDotOptions.overlays = buildOverlays(!!config.cornersDotColor);
       result.cornersDotOptions.color = undefined;
       result.cornersDotOptions.gradient = undefined;
     } else if (config.cornersDotColor) {
@@ -261,10 +305,10 @@ export function randomizeOptions(
   }
 
   // --- outer eye (cornersSquare) ---
-  if (config.cornersSquareColor || config.cornersSquareShape || config.cornersSquarePattern) {
+  if (config.cornersSquareColor || config.cornersSquareShape || sqOv) {
     result.cornersSquareOptions = { ...base.cornersSquareOptions };
-    if (config.cornersSquarePattern) {
-      result.cornersSquareOptions.overlays = randomOverlays(rng);
+    if (sqOv) {
+      result.cornersSquareOptions.overlays = buildOverlays(!!config.cornersSquareColor);
       result.cornersSquareOptions.color = undefined;
       result.cornersSquareOptions.gradient = undefined;
     } else if (config.cornersSquareColor) {
