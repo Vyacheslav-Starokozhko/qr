@@ -257,6 +257,32 @@ export type ValidatorTuning = {
    *  range. Modules within this zone are treated as correct, preventing false
    *  positives from partially-filled custom shapes. Default 0.2. */
   deadbandFraction?: number;
+  /**
+   * Override the human-readable text for each issue.
+   * Each entry is either a static string or a function that receives the
+   * relevant numbers and returns a string — useful for localisation or
+   * domain-specific wording.
+   *
+   * @example
+   * messages: {
+   *   lowContrast: (actual, min) => `Низький контраст: ${actual.toFixed(1)} (мін. ${min})`,
+   *   finderDegraded: "Finder-патерни пошкоджені",
+   * }
+   */
+  messages?: {
+    /** Fired when measured contrast is below `minContrast`.
+     *  Params: actual contrast ratio, minimum required. */
+    lowContrast?: string | ((actual: number, minimum: number) => string);
+    /** Fired when finder patterns exceed `finderDegradedThreshold`.
+     *  Params: degraded module count, total finder modules. */
+    finderDegraded?: string | ((degraded: number, total: number) => string);
+    /** Fired when any timing-pattern module is wrong.
+     *  Params: degraded module count, total timing modules. */
+    timingDegraded?: string | ((degraded: number, total: number) => string);
+    /** Fired when degraded data modules exceed ECC tolerance.
+     *  Params: degraded count, total data modules, ECC tolerance, ECL label. */
+    dataDegraded?: string | ((degraded: number, total: number, tolerance: number, ecl: string) => string);
+  };
 };
 
 /**

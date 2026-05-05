@@ -84,10 +84,17 @@ export function validateQRCanvas(
   ecl: string,
   tuning?: ValidatorTuning,
 ): QRValidateResult {
-  const minContrast            = tuning?.minContrast            ?? 2.0;
+  const minContrast             = tuning?.minContrast             ?? 2.0;
   const finderDegradedThreshold = tuning?.finderDegradedThreshold ?? 0.25;
-  const samplePad              = tuning?.samplePad              ?? 0.2;
-  const deadbandFraction       = tuning?.deadbandFraction       ?? 0.2;
+  const samplePad               = tuning?.samplePad               ?? 0.2;
+  const deadbandFraction        = tuning?.deadbandFraction        ?? 0.2;
+  const msg                     = tuning?.messages ?? {};
+
+  const resolve = <T extends unknown[]>(
+    tpl: string | ((...a: T) => string) | undefined,
+    fallback: (...a: T) => string,
+    ...args: T
+  ): string => (typeof tpl === "function" ? tpl(...args) : tpl ?? fallback(...args));
 
   const ctx = canvas.getContext("2d");
   if (!ctx) {
@@ -183,25 +190,24 @@ export function validateQRCanvas(
 
   const issues: string[] = [];
   if (contrastRatio < minContrast) {
-    issues.push(
-      `Low contrast: ${contrastRatio.toFixed(1)}:1 (minimum ${minContrast.toFixed(1)}:1 required)`,
-    );
+    issues.push(resolve(msg.lowContrast,
+      (a, m) => `Low contrast: ${a.toFixed(1)}:1 (minimum ${m.toFixed(1)}:1 required)`,
+      contrastRatio, minContrast));
   }
   if (!finderPatternsOk) {
-    issues.push(
-      `Finder patterns degraded: ${degradedFinder}/${totalFinderModules} modules corrupted`,
-    );
+    issues.push(resolve(msg.finderDegraded,
+      (d, t) => `Finder patterns degraded: ${d}/${t} modules corrupted`,
+      degradedFinder, totalFinderModules));
   }
   if (!timingPatternsOk) {
-    issues.push(
-      `Timing patterns degraded: ${degradedTiming}/${totalTimingModules} modules corrupted`,
-    );
+    issues.push(resolve(msg.timingDegraded,
+      (d, t) => `Timing patterns degraded: ${d}/${t} modules corrupted`,
+      degradedTiming, totalTimingModules));
   }
   if (degradedData > eccToleranceModules) {
-    issues.push(
-      `Too many degraded data modules: ${degradedData}/${totalDataModules} ` +
-        `(ECC-${ecl} tolerates up to ${eccToleranceModules})`,
-    );
+    issues.push(resolve(msg.dataDegraded,
+      (d, t, tol, e) => `Too many degraded data modules: ${d}/${t} (ECC-${e} tolerates up to ${tol})`,
+      degradedData, totalDataModules, eccToleranceModules, ecl));
   }
 
   const valid =
