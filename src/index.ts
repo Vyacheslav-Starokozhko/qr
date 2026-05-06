@@ -28,6 +28,8 @@ export { exportQR, QRShapes, FileExtension, ExportOptions };
 export * from "./types";
 export { randomizeOptions, invertOptions, normalizeOptions } from "./randomize";
 export type { RandomizeConfig, RandomizeTuning } from "./randomize";
+export { analyzeFrame, compressFrame } from "./core/frame-analyzer";
+export type { FrameAnalysis, FrameSource, CompressFrameOptions, CompressFrameResult } from "./core/frame-analyzer";
 
 // --- Helpers ---
 
