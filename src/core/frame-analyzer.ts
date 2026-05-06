@@ -7,6 +7,33 @@ export type FrameAnalysis = {
   isDark: boolean;
   /** Detected inner cutout color — used as the QR background */
   cutoutColor: string;
+  /**
+   * Detected bounding box of the QR cutout area, in source-image pixels.
+   * Use `insetFraction` when the output frame dimensions differ from the source image.
+   */
+  inset: { x: number; y: number; width: number; height: number };
+  /**
+   * Same bounding box as `inset`, but normalized to [0–1] relative to source dimensions.
+   * To get output pixel coordinates: multiply x/width by `frame.width`, y/height by `frame.height`.
+   *
+   * @example
+   * const { insetFraction } = await analyzeFrame(source);
+   * const frameWidth = 1000, frameHeight = 800;
+   * frame: {
+   *   source,
+   *   width: frameWidth, height: frameHeight,
+   *   inset: {
+   *     x: Math.round(insetFraction.x * frameWidth),
+   *     y: Math.round(insetFraction.y * frameHeight),
+   *     width:  Math.round(insetFraction.width  * frameWidth),
+   *     height: Math.round(insetFraction.height * frameHeight),
+   *   }
+   * }
+   */
+  insetFraction: { x: number; y: number; width: number; height: number };
+  /** Natural pixel dimensions of the source frame image */
+  sourceWidth: number;
+  sourceHeight: number;
   /** Ready-to-use QR options whose colors complement the frame */
   options: Partial<Options>;
 };
@@ -232,6 +259,104 @@ function detectCutoutColor(
   return `#${round(sumR)}${round(sumG)}${round(sumB)}`;
 }
 
+/**
+ * Detects the bounding box of the QR cutout area by classifying each row/column
+ * as "cutout-like" or "frame-like" based on luminance distance to the two zones,
+ * then expands outward from the image center to find the contiguous cutout block.
+ */
+function detectCutoutBounds(
+  data: Uint8ClampedArray,
+  w: number, h: number,
+  borderFraction: number,
+  centerFraction: number,
+): { x: number; y: number; width: number; height: number } {
+  const step = Math.max(1, Math.floor(Math.min(w, h) / 200));
+
+  // Measure mean luminance of center (cutout) and border (frame) zones.
+  // Skip transparent pixels — they're outside the frame content, not the cutout.
+  let sumC = 0, cntC = 0, sumB = 0, cntB = 0;
+  for (let py = 0; py < h; py += step) {
+    for (let px = 0; px < w; px += step) {
+      const i = (py * w + px) * 4;
+      if (data[i + 3] < 128) continue; // skip transparent
+      const lum = luminance(data[i], data[i + 1], data[i + 2]);
+      if (isInCenter(px, py, w, h, centerFraction)) {
+        sumC += lum; cntC++;
+      } else if (isInBorder(px, py, w, h, borderFraction * 0.5)) {
+        sumB += lum; cntB++;
+      }
+    }
+  }
+  const cutoutLum = cntC > 0 ? sumC / cntC : 0.9;
+  const frameLum  = cntB > 0 ? sumB / cntB  : 0.1;
+
+  // Fallback: insufficient contrast between zones — return centered 50% region
+  if (Math.abs(cutoutLum - frameLum) < 0.08) {
+    return {
+      x: Math.round(w * 0.25), y: Math.round(h * 0.25),
+      width: Math.round(w * 0.5), height: Math.round(h * 0.5),
+    };
+  }
+
+  // Score each pixel: 1 = closer to cutout luminance, 0 = closer to frame luminance
+  const isCutout = (lum: number) =>
+    Math.abs(lum - cutoutLum) <= Math.abs(lum - frameLum);
+
+  // Per-row score: fraction of OPAQUE pixels that are cutout-like.
+  // Transparent pixels are skipped — an all-transparent row (outer background) scores 0.
+  const rowScore = new Float32Array(h);
+  for (let py = 0; py < h; py++) {
+    let sum = 0, cnt = 0;
+    for (let px = 0; px < w; px += step) {
+      const i = (py * w + px) * 4;
+      if (data[i + 3] < 128) continue;
+      const lum = luminance(data[i], data[i + 1], data[i + 2]);
+      sum += isCutout(lum) ? 1 : 0;
+      cnt++;
+    }
+    rowScore[py] = cnt > 0 ? sum / cnt : 0;
+  }
+
+  // Per-column score
+  const colScore = new Float32Array(w);
+  for (let px = 0; px < w; px++) {
+    let sum = 0, cnt = 0;
+    for (let py = 0; py < h; py += step) {
+      const i = (py * w + px) * 4;
+      if (data[i + 3] < 128) continue;
+      const lum = luminance(data[i], data[i + 1], data[i + 2]);
+      sum += isCutout(lum) ? 1 : 0;
+      cnt++;
+    }
+    colScore[px] = cnt > 0 ? sum / cnt : 0;
+  }
+
+  // Expand from image center outward along contiguous high-scoring rows/cols
+  const scoreThr = 0.5;
+  const midY = Math.floor(h / 2);
+  const midX = Math.floor(w / 2);
+
+  let top = midY, bottom = midY;
+  if (rowScore[midY] >= scoreThr) {
+    while (top > 0 && rowScore[top - 1] >= scoreThr) top--;
+    while (bottom < h - 1 && rowScore[bottom + 1] >= scoreThr) bottom++;
+  }
+
+  let left = midX, right = midX;
+  if (colScore[midX] >= scoreThr) {
+    while (left > 0 && colScore[left - 1] >= scoreThr) left--;
+    while (right < w - 1 && colScore[right + 1] >= scoreThr) right++;
+  }
+
+  // Clamp to image bounds and ensure non-zero size
+  const x      = Math.max(0, left);
+  const y      = Math.max(0, top);
+  const width  = Math.max(1, Math.min(w, right + 1) - x);
+  const height = Math.max(1, Math.min(h, bottom + 1) - y);
+
+  return { x, y, width, height };
+}
+
 // ─── Contrast adjustment ──────────────────────────────────────────────────────
 
 function adjustContrast(hex: string, bgHex: string, minRatio: number): string {
@@ -315,7 +440,15 @@ export async function analyzeFrame(
   const cutoutColor = detectCutoutColor(data, w, h, centerFraction);
   const options     = buildQROptions(palette, cutoutColor);
 
-  return { palette, isDark, cutoutColor, options };
+  const inset = detectCutoutBounds(data, w, h, borderFraction, centerFraction);
+  const insetFraction = {
+    x:      inset.x / w,
+    y:      inset.y / h,
+    width:  inset.width  / w,
+    height: inset.height / h,
+  };
+
+  return { palette, isDark, cutoutColor, inset, insetFraction, sourceWidth: w, sourceHeight: h, options };
 }
 
 // ─── compressFrame ────────────────────────────────────────────────────────────
