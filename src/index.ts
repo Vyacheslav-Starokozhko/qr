@@ -2014,9 +2014,12 @@ export async function QRCodeGenerate(
     const svgW = config.width ?? frame.width;
     const svgH = config.height ?? frame.height;
 
-    // Scale factor: map QR fullSize units → inset pixel area
-    const scaleX = inset.width / fullSize;
-    const scaleY = inset.height / fullSize;
+    // Uniform scale: fit the square QR into the inset area without stretching.
+    // Use the smaller dimension so the QR always fits, then centre within the inset.
+    const scale = Math.min(inset.width, inset.height) / fullSize;
+    const qrDisplaySize = scale * fullSize;
+    const qrOffsetX = inset.x + (inset.width - qrDisplaySize) / 2;
+    const qrOffsetY = inset.y + (inset.height - qrDisplaySize) / 2;
 
     // Collect all labels: single `label` (backward compat) + `labels` array
     const allLabels = [
@@ -2031,7 +2034,7 @@ export async function QRCodeGenerate(
       <!-- Frame image (behind everything) -->
       <image href="${frame.source}" x="0" y="0" width="${frame.width}" height="${frame.height}" preserveAspectRatio="xMidYMid slice" />
       <!-- QR code scaled into the inset area -->
-      <g transform="translate(${inset.x}, ${inset.y}) scale(${scaleX.toFixed(6)}, ${scaleY.toFixed(6)})">
+      <g transform="translate(${qrOffsetX.toFixed(3)}, ${qrOffsetY.toFixed(3)}) scale(${scale.toFixed(6)}, ${scale.toFixed(6)})">
         ${qrContent}
       </g>
       ${labelSvg}
