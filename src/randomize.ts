@@ -76,7 +76,15 @@ export type RandomizeTuning = {
     liquidChance?: number;
     /** Chance of adding a blend-mode overlay (0–1, default 0.20) */
     blendChance?: number;
-    /** Max total effects to stack (default 2) */
+    /** Chance of adding a grain/noise texture (0–1, default 0.25) */
+    noiseChance?: number;
+    /** Chance of applying a duotone color remap (0–1, default 0.15) */
+    duotoneChance?: number;
+    /** Chance of adding a specular emboss highlight (0–1, default 0.20) */
+    embossChance?: number;
+    /** Chance of adding RGB chromatic aberration (0–1, default 0.18) */
+    colorSplitChance?: number;
+    /** Max total effects to stack (default 3) */
     maxEffects?: number;
   };
 
@@ -90,7 +98,15 @@ export type RandomizeTuning = {
     drawChance?: number;
     /** Chance of generating a glow animation (0–1, default 0.20) */
     glowChance?: number;
-    /** Max total animations to stack (default 2) */
+    /** Chance of generating a hue-cycle animation (0–1, default 0.25) */
+    colorCycleChance?: number;
+    /** Chance of generating expanding ripple rings (0–1, default 0.30) */
+    rippleChance?: number;
+    /** Chance of generating a moving spotlight (0–1, default 0.25) */
+    spotlightChance?: number;
+    /** Chance of generating a float/bob animation (0–1, default 0.20) */
+    floatChance?: number;
+    /** Max total animations to stack (default 3) */
     maxAnimations?: number;
     /** Duration range [min, max] seconds. Default [1.5, 4] */
     durationRange?: [number, number];
@@ -228,9 +244,11 @@ type RT = {
   // effects
   fxDropShadow: number; fxNeonGlow: number; fxMorphology: number;
   fxLiquid: number; fxBlend: number; fxMax: number;
+  fxNoise: number; fxDuotone: number; fxEmboss: number; fxColorSplit: number;
   // animations
   anPulse: number; anShimmer: number; anDraw: number; anGlow: number;
   anMax: number; anDurRange: [number,number];
+  anColorCycle: number; anRipple: number; anSpotlight: number; anFloat: number;
 };
 
 function resolveT(t?: RandomizeTuning): RT {
@@ -266,13 +284,21 @@ function resolveT(t?: RandomizeTuning): RT {
     fxMorphology: e?.morphologyChance  ?? 0.20,
     fxLiquid:     e?.liquidChance      ?? 0.15,
     fxBlend:      e?.blendChance       ?? 0.20,
-    fxMax:        e?.maxEffects        ?? 2,
-    anPulse:   a?.pulseChance    ?? 0.30,
-    anShimmer: a?.shimmerChance  ?? 0.30,
-    anDraw:    a?.drawChance     ?? 0.20,
-    anGlow:    a?.glowChance     ?? 0.20,
-    anMax:     a?.maxAnimations  ?? 2,
-    anDurRange: a?.durationRange ?? [1.5, 4],
+    fxMax:        e?.maxEffects        ?? 3,
+    fxNoise:      e?.noiseChance       ?? 0.25,
+    fxDuotone:    e?.duotoneChance     ?? 0.15,
+    fxEmboss:     e?.embossChance      ?? 0.20,
+    fxColorSplit: e?.colorSplitChance  ?? 0.18,
+    anPulse:      a?.pulseChance       ?? 0.30,
+    anShimmer:    a?.shimmerChance     ?? 0.30,
+    anDraw:       a?.drawChance        ?? 0.20,
+    anGlow:       a?.glowChance        ?? 0.20,
+    anMax:        a?.maxAnimations     ?? 3,
+    anDurRange:   a?.durationRange     ?? [1.5, 4],
+    anColorCycle: a?.colorCycleChance  ?? 0.25,
+    anRipple:     a?.rippleChance      ?? 0.30,
+    anSpotlight:  a?.spotlightChance   ?? 0.25,
+    anFloat:      a?.floatChance       ?? 0.20,
   };
 }
 
@@ -381,7 +407,13 @@ function makeGen(tc: RT) {
     return hslToHex(Math.floor(rng() * 360), 70 + Math.floor(rng() * 30), 50 + Math.floor(rng() * 20));
   }
 
-  function randomEffects(rng: () => number): QrEffect[] {
+  // Blend modes safe for each theme.
+  // Light bg (dark dots): avoid screen/lighten/color-dodge which wash out dark modules.
+  // Dark  bg (light dots): avoid multiply/darken/color-burn which kill light modules.
+  const SAFE_BLEND_LIGHT = ["multiply", "darken", "soft-light", "overlay"] as const;
+  const SAFE_BLEND_DARK  = ["screen", "lighten", "soft-light", "overlay"] as const;
+
+  function randomEffects(rng: () => number, isDark: boolean): QrEffect[] {
     const out: QrEffect[] = [];
     const dur = (lo: number, hi: number) => lo + rng() * (hi - lo);
 
@@ -389,11 +421,11 @@ function makeGen(tc: RT) {
       out.push({
         type: "drop-shadow",
         target: pick(EFFECT_TARGETS, rng),
-        dx: (rng() * 3 - 1.5),
-        dy: (rng() * 3 - 1.5),
-        blur: dur(0.5, 2.5),
+        dx: (rng() * 2 - 1),
+        dy: (rng() * 2 - 1),
+        blur: dur(0.3, 1.5),
         color: randomColor(rng),
-        opacity: 0.4 + rng() * 0.5,
+        opacity: 0.3 + rng() * 0.35,
       });
     }
     if (rng() < tc.fxNeonGlow && out.length < tc.fxMax) {
@@ -401,33 +433,79 @@ function makeGen(tc: RT) {
         type: "neon-glow",
         target: pick(EFFECT_TARGETS, rng),
         color: randomColor(rng),
-        spread: dur(0.5, 2),
-        intensity: dur(1.5, 4),
+        // Keep spread/intensity small — SVG units = module units; large values
+        // bleed across adjacent modules and corrupt timing patterns.
+        spread: dur(0.2, 0.8),
+        intensity: dur(0.4, 1.2),
       });
     }
     if (rng() < tc.fxMorphology && out.length < tc.fxMax) {
+      // "dilate" expands dots in module-unit space. Adjacent timing-pattern modules
+      // are 1 module apart; dilate > 0.1 bridges the gap and corrupts the pattern.
+      // Use "erode" (shrinks dots, always safe) or a very small dilate.
+      const operator = rng() < 0.7 ? "erode" : "dilate";
       out.push({
         type: "morphology",
         target: rng() < 0.7 ? "dots" : "eyes",
-        operator: rng() < 0.6 ? "dilate" : "erode",
-        radius: dur(0.1, 0.5),
+        operator,
+        radius: operator === "dilate" ? dur(0.02, 0.07) : dur(0.04, 0.15),
       });
     }
     if (rng() < tc.fxLiquid && out.length < tc.fxMax) {
+      // blur is in module units. blur > ~0.35 modules merges adjacent timing-pattern
+      // dots and threshold > ~0.15 makes the alpha cutoff too aggressive.
       out.push({
         type: "liquid",
         target: "dots",
-        blur: dur(0.8, 1.8),
-        threshold: 0.25 + rng() * 0.25,
+        blur: dur(0.15, 0.30),
+        threshold: 0.05 + rng() * 0.10,
       });
     }
     if (rng() < tc.fxBlend && out.length < tc.fxMax) {
       out.push({
         type: "blend",
         target: pick(EFFECT_TARGETS, rng),
-        mode: pick(BLEND_MODES, rng),
+        mode: pick(isDark ? SAFE_BLEND_DARK : SAFE_BLEND_LIGHT, rng),
         color: randomColor(rng),
-        opacity: 0.3 + rng() * 0.5,
+        // Cap opacity low: high-opacity blend + screen/multiply dramatically reduces
+        // effective contrast even when dot colors pass the normalizer.
+        opacity: 0.10 + rng() * 0.20,
+      });
+    }
+    if (rng() < tc.fxNoise && out.length < tc.fxMax) {
+      out.push({
+        type: "noise",
+        target: pick(EFFECT_TARGETS, rng),
+        frequency: 0.4 + rng() * 0.6,
+        octaves: 3 + Math.floor(rng() * 3),
+        opacity: 0.08 + rng() * 0.14,
+        seed: Math.floor(rng() * 100),
+      });
+    }
+    if (rng() < tc.fxDuotone && out.length < tc.fxMax) {
+      // Duotone: pick a saturated hue; map dark→dark-hue, light→light-hue.
+      // The contrast between them is always high because we use extreme lightness.
+      const h = Math.floor(rng() * 360);
+      const colorDark  = isDark ? hslToHex(h, 70, 75) : hslToHex(h, 80, 15);
+      const colorLight = isDark ? hslToHex(h, 30, 12) : hslToHex(h, 20, 92);
+      out.push({ type: "duotone", target: pick(EFFECT_TARGETS, rng), colorDark, colorLight });
+    }
+    if (rng() < tc.fxEmboss && out.length < tc.fxMax) {
+      const DIRS = ["ne", "se", "sw", "nw"] as const;
+      out.push({
+        type: "emboss",
+        target: pick(EFFECT_TARGETS, rng),
+        direction: pick(DIRS, rng),
+        strength: 0.35 + rng() * 0.45,
+        surfaceScale: 3 + rng() * 3,
+      });
+    }
+    if (rng() < tc.fxColorSplit && out.length < tc.fxMax) {
+      out.push({
+        type: "color-split",
+        target: pick(EFFECT_TARGETS, rng),
+        offset: 0.20 + rng() * 0.30,
+        direction: rng() < 0.5 ? "horizontal" : "vertical",
       });
     }
     return out;
@@ -464,6 +542,44 @@ function makeGen(tc: RT) {
         delay: delay(),
       });
     }
+    if (rng() < tc.anColorCycle && out.length < tc.anMax) {
+      out.push({
+        type: "color-cycle",
+        target: pick(["dots", "eyes", "all"] as const, rng),
+        duration: 3 + rng() * 4,
+        delay: delay(),
+      });
+    }
+    if (rng() < tc.anRipple && out.length < tc.anMax) {
+      out.push({
+        type: "ripple",
+        color: randomColor(rng),
+        opacity: 0.35 + rng() * 0.35,
+        count: 1 + Math.floor(rng() * 2),
+        strokeWidth: 0.25 + rng() * 0.4,
+        duration: dur(),
+        delay: delay(),
+      });
+    }
+    if (rng() < tc.anSpotlight && out.length < tc.anMax) {
+      out.push({
+        type: "spotlight",
+        color: randomColor(rng),
+        opacity: 0.20 + rng() * 0.25,
+        radius: 30 + rng() * 20,
+        duration: dur(),
+        delay: delay(),
+      });
+    }
+    if (rng() < tc.anFloat && out.length < tc.anMax) {
+      out.push({
+        type: "float",
+        amplitude: 0.6 + rng() * 1.0,
+        direction: rng() < 0.7 ? "vertical" : "horizontal",
+        duration: 2.5 + rng() * 2,
+        delay: delay(),
+      });
+    }
     return out;
   }
 
@@ -475,7 +591,7 @@ function makeGen(tc: RT) {
     layerFill,
     maskLayers,
     overlays,
-    randomEffects,
+    randomEffects: (rng: () => number, isDark: boolean) => randomEffects(rng, isDark),
     randomAnimations,
     dotShape: (rng: () => number) =>
       rng() < tc.dotIconChance
@@ -628,7 +744,7 @@ export function randomizeOptions(
 
   // --- effects ---
   if (config.effects) {
-    const fx = gen.randomEffects(rng);
+    const fx = gen.randomEffects(rng, isDark);
     if (fx.length > 0) result.effects = fx;
   }
 
@@ -798,7 +914,7 @@ function _adjustPart(
       // High-opacity masked layers can fully obscure the base in their pattern area.
       // If their color blends into the background, those dot regions become invisible to scanners.
       const opacity = o.opacity ?? 1;
-      if (opacity >= 0.5) {
+      if (opacity >= 0.35) {
         const lum = o.fill.type === "color" ? _hexLum(o.fill.color) : o.fill.type === "gradient" ? _gradLum(o.fill.gradient) : 1;
         if (_wcag(lum, bgLum) < minRatio) {
           return { ...o, fill: _adjustFill(o.fill, bgLum, minRatio, darker) };
@@ -819,7 +935,7 @@ function _hasProblematicMaskedLayer(part: QrPartOptions | undefined, bgLum: numb
   return part.overlays.some((o) => {
     if (!o.mask) return false;
     const opacity = o.opacity ?? 1;
-    if (opacity < 0.5) return false;
+    if (opacity < 0.35) return false;
     const lum = o.fill.type === "color" ? _hexLum(o.fill.color) : o.fill.type === "gradient" ? _gradLum(o.fill.gradient) : 1;
     return _wcag(lum, bgLum) < minRatio;
   });
@@ -844,6 +960,24 @@ function _hasProblematicMaskedLayer(part: QrPartOptions | undefined, bgLum: numb
  * @param minContrast Minimum WCAG contrast ratio (default 3.0).
  */
 export function normalizeOptions(base: Options, minContrast = 3.0): Options {
+  // Boost the required base contrast to compensate for SVG effects that reduce
+  // perceived contrast after rendering (blend, neon-glow, liquid all attenuate
+  // the luminance difference between dark modules and light background/gaps).
+  let effectiveMin = minContrast;
+  for (const fx of (base.effects as any[] | undefined) ?? []) {
+    if      (fx.type === "blend")       effectiveMin = Math.max(effectiveMin, minContrast + 2.5);
+    else if (fx.type === "neon-glow")   effectiveMin = Math.max(effectiveMin, minContrast + 2.0);
+    else if (fx.type === "liquid")      effectiveMin = Math.max(effectiveMin, minContrast + 1.5);
+    else if (fx.type === "morphology")  effectiveMin = Math.max(effectiveMin, minContrast + 1.0);
+    else if (fx.type === "drop-shadow") effectiveMin = Math.max(effectiveMin, minContrast + 0.5);
+    // New effects — all are luminance-safe but require extra headroom for safety
+    else if (fx.type === "noise")       effectiveMin = Math.max(effectiveMin, minContrast + 0.5);
+    else if (fx.type === "emboss")      effectiveMin = Math.max(effectiveMin, minContrast + 0.5);
+    // duotone replaces all colors — normalizer can't help, contrast is set by the duotone colors themselves
+    // color-split, noise: no effective contrast reduction on pure-black dots
+  }
+  const minContrast_ = effectiveMin;
+
   const bgLum = _bgLum(base);
   const dotsLum = _partLum(base.dotsOptions) ?? 0;
   const csLum   = _partLum(base.cornersSquareOptions);
@@ -851,20 +985,20 @@ export function normalizeOptions(base: Options, minContrast = 3.0): Options {
   const darkenDots = dotsLum <= bgLum;
 
   const ok = (lum: number | null) =>
-    lum === null || _wcag(lum, bgLum) >= minContrast;
+    lum === null || _wcag(lum, bgLum) >= minContrast_;
 
   if (
     ok(dotsLum) && ok(csLum) && ok(cdLum) &&
-    !_hasProblematicMaskedLayer(base.dotsOptions, bgLum, minContrast) &&
-    !_hasProblematicMaskedLayer(base.cornersSquareOptions, bgLum, minContrast) &&
-    !_hasProblematicMaskedLayer(base.cornersDotOptions, bgLum, minContrast)
+    !_hasProblematicMaskedLayer(base.dotsOptions, bgLum, minContrast_) &&
+    !_hasProblematicMaskedLayer(base.cornersSquareOptions, bgLum, minContrast_) &&
+    !_hasProblematicMaskedLayer(base.cornersDotOptions, bgLum, minContrast_)
   ) return base;
 
   return {
     ...base,
-    dotsOptions: _adjustPart(base.dotsOptions, bgLum, minContrast, darkenDots),
-    cornersSquareOptions: _adjustPart(base.cornersSquareOptions, bgLum, minContrast, darkenDots),
-    cornersDotOptions: _adjustPart(base.cornersDotOptions, bgLum, minContrast, darkenDots),
+    dotsOptions: _adjustPart(base.dotsOptions, bgLum, minContrast_, darkenDots),
+    cornersSquareOptions: _adjustPart(base.cornersSquareOptions, bgLum, minContrast_, darkenDots),
+    cornersDotOptions: _adjustPart(base.cornersDotOptions, bgLum, minContrast_, darkenDots),
   };
 }
 

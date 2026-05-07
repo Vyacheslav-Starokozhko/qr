@@ -325,12 +325,74 @@ export type QrEffectBlend = QrEffectBase & {
   opacity?: number;
 };
 
+/**
+ * Grain / film-noise texture — `feTurbulence` pattern blended over the target.
+ * Darkens mid-tones slightly; pure black dots and pure white gaps are unaffected,
+ * so contrast and scannability are preserved.
+ */
+export type QrEffectNoise = QrEffectBase & {
+  type: "noise";
+  /** Turbulence frequency — higher = finer grain (default 0.65) */
+  frequency?: number;
+  /** Fractal octaves — higher = more detail (default 4) */
+  octaves?: number;
+  /** Noise strength 0–1 (default 0.15) */
+  opacity?: number;
+  /** Turbulence seed for reproducible patterns (default 1) */
+  seed?: number;
+};
+
+/**
+ * Two-color duotone remap — converts the target to grayscale then maps the
+ * dark end to `colorDark` and the light end to `colorLight`. Purely a color
+ * transform; no spatial change; safe for scanning.
+ */
+export type QrEffectDuotone = QrEffectBase & {
+  type: "duotone";
+  /** Color mapped to dark modules (default `"#000000"`) */
+  colorDark?: string;
+  /** Color mapped to light modules / background (default `"#ffffff"`) */
+  colorLight?: string;
+};
+
+/**
+ * 3-D emboss / specular lighting — adds a bright specular highlight on the
+ * lit side of each dot using `feSpecularLighting`. The dark dot areas remain
+ * dark; only a highlight is added, preserving contrast.
+ */
+export type QrEffectEmboss = QrEffectBase & {
+  type: "emboss";
+  /** Light source direction (default `"ne"`) */
+  direction?: "ne" | "se" | "sw" | "nw";
+  /** Highlight strength 0–1 (default 0.6) */
+  strength?: number;
+  /** Surface bump scale — higher = steeper apparent relief (default 4) */
+  surfaceScale?: number;
+};
+
+/**
+ * RGB chromatic aberration — separates the red and blue channels by a small
+ * offset in opposite directions, creating colorful fringing at dot edges.
+ * Purely a visual effect; dot shapes and positions are unchanged.
+ */
+export type QrEffectColorSplit = QrEffectBase & {
+  type: "color-split";
+  /** Channel separation in module units (default 0.35) */
+  offset?: number;
+  /** Offset axis (default `"horizontal"`) */
+  direction?: "horizontal" | "vertical";
+};
+
 export type QrEffect =
   | QrEffectDropShadow
   | QrEffectNeonGlow
   | QrEffectMorphology
   | QrEffectLiquid
-  | QrEffectBlend;
+  | QrEffectBlend
+  | QrEffectNoise
+  | QrEffectDuotone
+  | QrEffectEmboss
+  | QrEffectColorSplit;
 
 // ---------------------------------------------------------------------------
 // Animation
@@ -388,11 +450,74 @@ export type QrAnimationGlow = QrAnimBase & {
   intensity?: number;
 };
 
+/**
+ * Animated hue rotation — cycles the dot (and optionally eye) colors through
+ * the full colour wheel. Uses `feColorMatrix type="hueRotate"`. Luminance is
+ * unchanged, so contrast between dark modules and background is preserved on
+ * every frame — safe for GIF export.
+ */
+export type QrAnimationColorCycle = QrAnimBase & {
+  type: "color-cycle";
+  /** Parts to colour-cycle (default `"all"`) */
+  target?: "dots" | "eyes" | "all";
+  /** Full 360° hue cycle duration in seconds (default 4) */
+  duration?: number;
+};
+
+/**
+ * Expanding ripple ring — one or more concentric stroke circles that grow from
+ * the QR centre and fade out. Purely decorative; the ring never occludes any
+ * module, so every frame is scannable.
+ */
+export type QrAnimationRipple = QrAnimBase & {
+  type: "ripple";
+  /** Ring stroke color (default: inherits dot color) */
+  color?: string;
+  /** Peak ring opacity 0–1 (default 0.55) */
+  opacity?: number;
+  /** Number of concentric ripple rings 1–3 (default 1) */
+  count?: number;
+  /** Stroke width in module units (default 0.4) */
+  strokeWidth?: number;
+};
+
+/**
+ * Moving radial spotlight — a soft radial gradient that sweeps in a circular
+ * path over the QR surface, adding a dynamic brightness accent. Applied as an
+ * overlay at low opacity so it never lowers module contrast.
+ */
+export type QrAnimationSpotlight = QrAnimBase & {
+  type: "spotlight";
+  /** Spotlight tint color (default `"#ffffff"`) */
+  color?: string;
+  /** Peak opacity 0–1 (default 0.35) */
+  opacity?: number;
+  /** Spotlight radius as % of QR size (default 40) */
+  radius?: number;
+};
+
+/**
+ * Gentle float — sinusoidal translate animation that gives the QR a
+ * "breathing" or hovering feel. The maximum displacement is small enough that
+ * the QR stays fully within its viewBox on every frame.
+ */
+export type QrAnimationFloat = QrAnimBase & {
+  type: "float";
+  /** Peak displacement in module units (default 1.2) */
+  amplitude?: number;
+  /** Motion axis (default `"vertical"`) */
+  direction?: "vertical" | "horizontal";
+};
+
 export type QrAnimation =
   | QrAnimationPulse
   | QrAnimationShimmer
   | QrAnimationDraw
-  | QrAnimationGlow;
+  | QrAnimationGlow
+  | QrAnimationColorCycle
+  | QrAnimationRipple
+  | QrAnimationSpotlight
+  | QrAnimationFloat;
 
 /** @deprecated Use `ExportOptions` from the main export — all fields are now unified. */
 export type GifExportOptions = import("./export").ExportOptions;

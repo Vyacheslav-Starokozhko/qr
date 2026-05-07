@@ -1246,9 +1246,12 @@ function triangleWave(vTo: number, vFrom: number, cycleFrac: number): number {
 
 // Returns the animation cycle duration in seconds (longest repeating animation)
 export function getAnimationDuration(animations: QrAnimation[]): number {
+  const defaults: Partial<Record<QrAnimation["type"], number>> = {
+    draw: 1.5, shimmer: 2.5, "color-cycle": 4, float: 3, ripple: 2, spotlight: 3,
+  };
   let max = 0;
   for (const a of animations) {
-    const dur = a.duration ?? (a.type === "draw" ? 1.5 : a.type === "shimmer" ? 2.5 : 2);
+    const dur = a.duration ?? defaults[a.type] ?? 2;
     if (a.type === "draw" && a.repeat === false) continue; // one-shot, don't drive loop
     max = Math.max(max, dur);
   }
@@ -1395,6 +1398,115 @@ function buildAnimations(
       const prevD = wrapDots, prevE = wrapEyes;
       wrapDots = (s) => prevD(`<g filter="url(#${fid})">${s}</g>`);
       wrapEyes = (s) => prevE(`<g filter="url(#${fid})">${s}</g>`);
+
+    } else if (anim.type === "color-cycle") {
+      // Animated hueRotate — pure hue shift, luminance unchanged → all frames scannable.
+      const dur    = anim.duration ?? 4;
+      const target = anim.target  ?? "all";
+      const fid    = `qr-cc-${uid}`;
+      if (isFrame) {
+        const secs = Math.max(0, frameSecs! - delay);
+        const deg  = ((secs % dur) / dur * 360).toFixed(2);
+        defs += `<filter id="${fid}" color-interpolation-filters="sRGB">
+          <feColorMatrix type="hueRotate" values="${deg}"/>
+        </filter>`;
+      } else {
+        defs += `<filter id="${fid}" color-interpolation-filters="sRGB">
+          <feColorMatrix type="hueRotate" values="0">
+            <animate attributeName="values" from="0" to="360" dur="${dur}s" repeatCount="${rc}" begin="${delay}s" calcMode="linear"/>
+          </feColorMatrix>
+        </filter>`;
+      }
+      const wrap: AnimWrap = (s) => s ? `<g filter="url(#${fid})">${s}</g>` : s;
+      if (target === "dots" || target === "all") { const p = wrapDots;    wrapDots    = (s) => p(wrap(s)); }
+      if (target === "eyes" || target === "all") { const p = wrapEyes;    wrapEyes    = (s) => p(wrap(s)); }
+
+    } else if (anim.type === "ripple") {
+      // Expanding stroke rings that grow from the QR centre and fade out.
+      // Each ring is a separate <circle> element in the overlay — never covers modules.
+      const dur         = anim.duration    ?? 2;
+      const ringColor   = anim.color       ?? dotColor;
+      const peakOpacity = anim.opacity     ?? 0.55;
+      const count       = Math.min(3, Math.max(1, anim.count ?? 1));
+      const sw          = anim.strokeWidth ?? 0.4;
+      const cx = fullSize / 2, cy = fullSize / 2;
+      // Rings expand from inner radius (20% of half-size) to outer (90% of half-size).
+      const rMin = fullSize * 0.20, rMax = fullSize * 0.50;
+
+      for (let ri = 0; ri < count; ri++) {
+        const phaseOffset = ri / count; // stagger rings evenly
+        if (isFrame) {
+          const secs  = Math.max(0, frameSecs! - delay);
+          const phase = ((secs / dur + phaseOffset) % 1 + 1) % 1;
+          const r     = lerp(rMin, rMax, phase).toFixed(3);
+          const op    = (peakOpacity * (1 - phase)).toFixed(4);
+          overlay += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${ringColor}" stroke-width="${sw}" opacity="${op}" style="pointer-events:none"/>`;
+        } else {
+          const startR = rMin + phaseOffset * (rMax - rMin);
+          const begVal = `${(-phaseOffset * dur + delay).toFixed(3)}s`;
+          overlay += `<circle cx="${cx}" cy="${cy}" r="${startR.toFixed(3)}" fill="none" stroke="${ringColor}" stroke-width="${sw}" style="pointer-events:none">
+            <animate attributeName="r" from="${rMin}" to="${rMax}" dur="${dur}s" begin="${begVal}" repeatCount="${rc}" calcMode="linear"/>
+            <animate attributeName="opacity" from="${peakOpacity}" to="0" dur="${dur}s" begin="${begVal}" repeatCount="${rc}" calcMode="linear"/>
+          </circle>`;
+        }
+      }
+
+    } else if (anim.type === "spotlight") {
+      // Moving radial gradient applied as a low-opacity overlay — never lowers contrast.
+      const dur    = anim.duration ?? 3;
+      const color  = anim.color   ?? "#ffffff";
+      const op     = anim.opacity ?? 0.35;
+      const radius = (anim.radius ?? 40) / 100; // convert % to fraction
+      const gid    = `qr-spot-${uid}`;
+      // Spotlight sweeps in a circle: cx = 50 + 25*cos(t), cy = 50 + 25*sin(t)
+      if (isFrame) {
+        const secs  = Math.max(0, frameSecs! - delay);
+        const angle = (secs % dur) / dur * 2 * Math.PI;
+        const cx    = (0.5 + 0.25 * Math.cos(angle) * 100).toFixed(2);
+        const cy    = (0.5 + 0.25 * Math.sin(angle) * 100).toFixed(2);
+        defs += `<radialGradient id="${gid}" cx="${cx}%" cy="${cy}%" r="${(radius * 100).toFixed(1)}%" gradientUnits="objectBoundingBox">
+          <stop offset="0%" stop-color="${color}" stop-opacity="${op}"/>
+          <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+        </radialGradient>`;
+      } else {
+        // keyframe series for cx and cy over the circular path
+        const steps = 8;
+        const cxVals = Array.from({ length: steps + 1 }, (_, k) =>
+          (50 + 25 * Math.cos(2 * Math.PI * k / steps)).toFixed(2) + "%").join(";");
+        const cyVals = Array.from({ length: steps + 1 }, (_, k) =>
+          (50 + 25 * Math.sin(2 * Math.PI * k / steps)).toFixed(2) + "%").join(";");
+        defs += `<radialGradient id="${gid}" cx="75%" cy="50%" r="${(radius * 100).toFixed(1)}%" gradientUnits="objectBoundingBox">
+          <stop offset="0%" stop-color="${color}" stop-opacity="${op}"/>
+          <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+          <animate attributeName="cx" values="${cxVals}" dur="${dur}s" repeatCount="${rc}" begin="${delay}s" calcMode="linear"/>
+          <animate attributeName="cy" values="${cyVals}" dur="${dur}s" repeatCount="${rc}" begin="${delay}s" calcMode="linear"/>
+        </radialGradient>`;
+      }
+      overlay += `<rect width="${fullSize}" height="${fullSize}" fill="url(#${gid})" style="pointer-events:none;mix-blend-mode:screen"/>`;
+
+    } else if (anim.type === "float") {
+      // Sinusoidal translate — displacement peaks at ±amplitude module units.
+      // Maximum shift is << module gap, so every frame is scannable.
+      const dur       = anim.duration  ?? 3;
+      const amplitude = anim.amplitude ?? 1.2;
+      const isV       = (anim.direction ?? "vertical") === "vertical";
+      if (isFrame) {
+        const secs = Math.max(0, frameSecs! - delay);
+        const t    = Math.sin(2 * Math.PI * secs / dur) * amplitude;
+        const tx   = isV ? 0 : t, ty = isV ? t : 0;
+        const prev = wrapContent;
+        wrapContent = (s) => prev(`<g transform="translate(${tx.toFixed(4)},${ty.toFixed(4)})">${s}</g>`);
+      } else {
+        const kfCount = 8;
+        const vals = Array.from({ length: kfCount + 1 }, (_, k) => {
+          const t = Math.sin(2 * Math.PI * k / kfCount) * amplitude;
+          return isV ? `0,${t.toFixed(4)}` : `${t.toFixed(4)},0`;
+        }).join(";");
+        const tid = `qr-float-${uid}`;
+        // Wrap content in a group with animateTransform
+        const prev = wrapContent;
+        wrapContent = (s) => prev(`<g><animateTransform attributeName="transform" type="translate" values="${vals}" dur="${dur}s" repeatCount="${rc}" begin="${delay}s" calcMode="spline" keySplines="${Array(kfCount).fill("0.45 0 0.55 1").join(";")}"/>${s}</g>`);
+      }
     }
   }
 
@@ -1525,6 +1637,95 @@ function buildEffects(
         if (fx.target === "dots")  maskAttr = ` mask="url(#mask-dots)"`;
         if (fx.target === "eyes")  maskAttr = ` mask="url(#mask-cornerSquare)"`;
         overlay += `<rect width="${fullSize}" height="${fullSize}" fill="${fill}"${maskAttr} opacity="${op}" style="mix-blend-mode:${mode}"/>`;
+        break;
+      }
+
+      case "noise": {
+        // feTurbulence blended with multiply: pure black (0) * anything = 0,
+        // so dark dot modules stay dark regardless of noise value. Safe.
+        const freq    = fx.frequency ?? 0.65;
+        const octaves = fx.octaves  ?? 4;
+        const op      = fx.opacity  ?? 0.15;
+        const seed    = fx.seed     ?? 1;
+        defs += `<filter id="${fid}" color-interpolation-filters="sRGB">
+          <feTurbulence type="fractalNoise" baseFrequency="${freq}" numOctaves="${octaves}" seed="${seed}" stitchTiles="stitch" result="noise"/>
+          <feColorMatrix in="noise" type="saturate" values="0" result="gray"/>
+          <feComposite in="SourceGraphic" in2="gray" operator="arithmetic" k1="${op.toFixed(3)}" k2="${(1 - op).toFixed(3)}" k3="0" k4="0"/>
+        </filter>`;
+        // arithmetic: k1*SG*gray + k2*SG = SG*(op*gray + 1-op) — darkens midtones only
+        const wrap: AnimWrap = (s) => s ? `<g filter="url(#${fid})">${s}</g>` : s;
+        if (isAll)  { const p = wrapAll;  wrapAll  = (s) => p(wrap(s)); }
+        if (toDots) { const p = wrapDots; wrapDots = (s) => p(wrap(s)); }
+        if (toEyes) { const p = wrapEyes; wrapEyes = (s) => p(wrap(s)); }
+        break;
+      }
+
+      case "duotone": {
+        // Convert to grayscale then remap: lum=0 → colorDark, lum=1 → colorLight.
+        // Uses feColorMatrix (saturate=0) + feComponentTransfer linear ramp per channel.
+        const [rD, gD, bD] = parseHexToRgb01(fx.colorDark  ?? "#000000");
+        const [rL, gL, bL] = parseHexToRgb01(fx.colorLight ?? "#ffffff");
+        defs += `<filter id="${fid}" color-interpolation-filters="sRGB">
+          <feColorMatrix type="saturate" values="0" result="gray"/>
+          <feComponentTransfer in="gray">
+            <feFuncR type="linear" slope="${(rL - rD).toFixed(4)}" intercept="${rD.toFixed(4)}"/>
+            <feFuncG type="linear" slope="${(gL - gD).toFixed(4)}" intercept="${gD.toFixed(4)}"/>
+            <feFuncB type="linear" slope="${(bL - bD).toFixed(4)}" intercept="${bD.toFixed(4)}"/>
+          </feComponentTransfer>
+        </filter>`;
+        const wrap: AnimWrap = (s) => s ? `<g filter="url(#${fid})">${s}</g>` : s;
+        if (isAll)  { const p = wrapAll;  wrapAll  = (s) => p(wrap(s)); }
+        if (toDots) { const p = wrapDots; wrapDots = (s) => p(wrap(s)); }
+        if (toEyes) { const p = wrapEyes; wrapEyes = (s) => p(wrap(s)); }
+        break;
+      }
+
+      case "emboss": {
+        // feSpecularLighting adds a white specular highlight on the lit side of
+        // each dot. The dark dot bodies stay dark; only a highlight is added.
+        const dir     = fx.direction    ?? "ne";
+        const str     = fx.strength     ?? 0.6;
+        const surface = fx.surfaceScale ?? 4;
+        const lx = dir.includes("e") ?  fullSize * 1.3 : -fullSize * 0.3;
+        const ly = dir.includes("n") ? -fullSize * 0.3 :  fullSize * 1.3;
+        const lz = fullSize * 0.9;
+        defs += `<filter id="${fid}" x="-5%" y="-5%" width="110%" height="110%" color-interpolation-filters="sRGB">
+          <feGaussianBlur in="SourceAlpha" stdDeviation="0.4" result="bump"/>
+          <feSpecularLighting in="bump" surfaceScale="${surface}" specularConstant="1.2" specularExponent="30" lighting-color="white" result="spec">
+            <fePointLight x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" z="${lz.toFixed(1)}"/>
+          </feSpecularLighting>
+          <feComposite in="spec" in2="SourceAlpha" operator="in" result="specMasked"/>
+          <feComposite in="SourceGraphic" in2="specMasked" operator="arithmetic" k1="0" k2="1" k3="${str.toFixed(3)}" k4="0"/>
+        </filter>`;
+        // feSpecularLighting only lights where there is alpha (the dot interior), preserving
+        // the background. The arithmetic composite keeps SourceGraphic + highlight.
+        const wrap: AnimWrap = (s) => s ? `<g filter="url(#${fid})">${s}</g>` : s;
+        if (isAll)  { const p = wrapAll;  wrapAll  = (s) => p(wrap(s)); }
+        if (toDots) { const p = wrapDots; wrapDots = (s) => p(wrap(s)); }
+        if (toEyes) { const p = wrapEyes; wrapEyes = (s) => p(wrap(s)); }
+        break;
+      }
+
+      case "color-split": {
+        // Separate R and B channels by ±offset, G stays centered.
+        // Creates colorful fringing at dot edges; dot bodies stay dark.
+        const off = fx.offset    ?? 0.35;
+        const isH = (fx.direction ?? "horizontal") === "horizontal";
+        const dx  = isH ? off : 0;
+        const dy  = isH ? 0 : off;
+        defs += `<filter id="${fid}" color-interpolation-filters="sRGB">
+          <feOffset in="SourceGraphic" dx="${-dx}" dy="${-dy}" result="left"/>
+          <feColorMatrix in="left" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="r"/>
+          <feOffset in="SourceGraphic" dx="${dx}" dy="${dy}" result="right"/>
+          <feColorMatrix in="right" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="b"/>
+          <feColorMatrix in="SourceGraphic" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="g"/>
+          <feBlend in="r" in2="g" mode="screen" result="rg"/>
+          <feBlend in="rg" in2="b" mode="screen"/>
+        </filter>`;
+        const wrap: AnimWrap = (s) => s ? `<g filter="url(#${fid})">${s}</g>` : s;
+        if (isAll)  { const p = wrapAll;  wrapAll  = (s) => p(wrap(s)); }
+        if (toDots) { const p = wrapDots; wrapDots = (s) => p(wrap(s)); }
+        if (toEyes) { const p = wrapEyes; wrapEyes = (s) => p(wrap(s)); }
         break;
       }
     }
