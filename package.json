@@ -1,6 +1,6 @@
 {
   "name": "qrstylelib",
-  "version": "1.3.6",
+  "version": "1.3.7",
   "description": "",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -39,6 +39,6 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
-    "gif-encoder-2": "^1.0.5"
+    "gifenc": "^1.0.3"
   }
 }

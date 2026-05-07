@@ -6,7 +6,9 @@
       "Bash(node test2.js)",
       "Bash(rm -f anim-*.svg debug_frame.png)",
       "Bash(npm version *)",
-      "Bash(node -e \"import\\('gif-encoder-2'\\).then\\(m => console.log\\('ok', Object.keys\\(m\\)\\)\\)\")"
+      "Bash(node -e \"import\\('gif-encoder-2'\\).then\\(m => console.log\\('ok', Object.keys\\(m\\)\\)\\)\")",
+      "Bash(node -e \"import\\('gifenc'\\).then\\(m => console.log\\(Object.keys\\(m\\)\\)\\)\")",
+      "Bash(node -e \"import\\('gifenc'\\).then\\(m => { const d = m.default; console.log\\(typeof d, Object.keys\\(d\\)\\); }\\)\")"
     ]
   }
 }

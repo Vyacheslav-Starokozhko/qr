@@ -30,30 +30,30 @@ export interface ExportOptions {
 /**
  * Converts a QR code to the requested format and returns a Buffer.
  *
- * Pass a pre-rendered **SVG string** for all formats including `"gif"` (static,
- * single-frame). Pass the original **Options object** when `format === "gif"` to
- * generate a true animated GIF — the encoder re-renders the SVG at every time
- * step so animation keyframes are preserved.
+ * Works in **browser and Node.js** for all formats including GIF.
+ *
+ * - Pass a pre-rendered **SVG string** for svg / png / jpeg / webp / static gif.
+ * - Pass the original **Options object** when `format === "gif"` to generate an
+ *   animated GIF — the encoder re-renders the SVG at every time step so SVG
+ *   animation keyframes (pulse, shimmer, draw, glow) are baked into the frames.
  *
  * @example
- * // PNG from SVG string
+ * // PNG from SVG string (Node.js — requires sharp)
  * const { svg } = await QRCodeGenerate({ data: 'https://example.com' });
  * const png = await exportQR(svg, 'png', { width: 1000 });
  *
- * // Animated GIF from QR options
+ * // Animated GIF — works in browser and Node.js
  * const gif = await exportQR(
  *   { data: 'https://example.com', animation: { type: 'pulse' } },
  *   'gif',
- *   { fps: 20, cycles: 2 },
+ *   { fps: 20, cycles: 2, background: '#ffffff' },
  * );
- * fs.writeFileSync('qr.gif', gif);
  */
 export async function exportQR(
   input: string | Options,
   format: FileExtension,
   options: ExportOptions = {},
 ): Promise<Buffer> {
-  // ── SVG passthrough ────────────────────────────────────────────────────────
   if (format === "svg") {
     const svg = typeof input === "string" ? input : "";
     return typeof Buffer !== "undefined"
@@ -61,16 +61,22 @@ export async function exportQR(
       : (new TextEncoder().encode(svg) as any);
   }
 
-  // ── GIF branch ────────────────────────────────────────────────────────────
   if (format === "gif") {
     return _encodeGIF(input, options);
   }
 
-  // ── Raster branch (png / jpeg / webp) ─────────────────────────────────────
+  // png / jpeg / webp — Node.js only (sharp)
   if (typeof input !== "string") {
     throw new Error("[exportQR] Pass a pre-rendered SVG string for png/jpeg/webp export.");
   }
+  return _sharpRaster(input, format, options);
+}
 
+// ---------------------------------------------------------------------------
+// Raster (Node.js / sharp)
+// ---------------------------------------------------------------------------
+
+async function _sharpRaster(svg: string, format: string, opts: ExportOptions): Promise<Buffer> {
   let sharp: any;
   try {
     const m = await import("sharp");
@@ -78,116 +84,24 @@ export async function exportQR(
   } catch {
     throw new Error("The 'sharp' package is required for PNG/JPEG/WEBP export in Node.js.");
   }
-
-  const svgBuf = typeof Buffer !== "undefined" ? Buffer.from(input, "utf-8") : (input as any);
+  const svgBuf = typeof Buffer !== "undefined" ? Buffer.from(svg, "utf-8") : (svg as any);
   let pipeline = sharp(svgBuf);
-
-  if (options.width || options.height) {
-    pipeline = pipeline.resize(options.width, options.height, {
+  if (opts.width || opts.height) {
+    pipeline = pipeline.resize(opts.width, opts.height, {
       fit: "contain",
       background: { r: 0, g: 0, b: 0, alpha: 0 },
     });
   }
-
-  const quality = options.quality ?? 90;
-
-  switch (format) {
-    case "png":  return pipeline.png().toBuffer();
-    case "jpeg": return pipeline.jpeg({ quality }).toBuffer();
-    case "webp": return pipeline.webp({ quality }).toBuffer();
-    default:
-      throw new Error(`[exportQR] Unsupported format: "${format}". Use: svg | png | jpeg | webp | gif`);
-  }
+  const quality = opts.quality ?? 90;
+  if (format === "png")  return pipeline.png().toBuffer();
+  if (format === "jpeg") return pipeline.jpeg({ quality }).toBuffer();
+  if (format === "webp") return pipeline.webp({ quality }).toBuffer();
+  throw new Error(`[exportQR] Unsupported format: "${format}". Use: svg | png | jpeg | webp | gif`);
 }
 
 // ---------------------------------------------------------------------------
-// GIF encoder (shared by exportQR and the legacy exportGIF alias)
+// SVG → raw RGBA (browser: Canvas, Node.js: sharp)
 // ---------------------------------------------------------------------------
-
-async function _encodeGIF(input: string | Options, opts: ExportOptions): Promise<Buffer> {
-  const { QRCodeGenerate, getAnimationDuration } = await import("./index");
-
-  let sharp: any;
-  try {
-    const m = await import("sharp");
-    sharp = m.default || m;
-  } catch {
-    throw new Error("The 'sharp' package is required for GIF export.");
-  }
-
-  let GifEncoder: any;
-  try {
-    const m = await import("gif-encoder-2");
-    GifEncoder = m.default || m;
-  } catch {
-    throw new Error("The 'gif-encoder-2' package is required for GIF export. Run: npm install gif-encoder-2");
-  }
-
-  const fps    = Math.max(1, Math.min(50, opts.fps    ?? 20));
-  const cycles = Math.max(1,              opts.cycles  ?? 1);
-  const repeat =                          opts.repeat  ?? 0;
-
-  // When a plain SVG string is given, produce a single-frame GIF.
-  const isSvgString = typeof input === "string";
-
-  let cycleDur = 0;
-  if (!isSvgString) {
-    const qrOpts = input as Options;
-    const animList = qrOpts.animation
-      ? (Array.isArray(qrOpts.animation) ? qrOpts.animation : [qrOpts.animation])
-      : [];
-    cycleDur = getAnimationDuration(animList);
-  }
-
-  const totalFrames = cycleDur > 0 ? Math.round(cycleDur * cycles * fps) : 1;
-  const frameDelay  = Math.round(1000 / fps);
-
-  // Render first frame to determine intrinsic dimensions.
-  const firstSvgBuf: Buffer = isSvgString
-    ? Buffer.from(input as string, "utf-8")
-    : Buffer.from((await QRCodeGenerate(input as Options, undefined, 0)).svg, "utf-8");
-
-  const cachedMatrix = isSvgString
-    ? undefined
-    : (await QRCodeGenerate(input as Options, undefined, 0)).matrix;
-
-  let outW = opts.width;
-  let outH = opts.height;
-  if (!outW || !outH) {
-    const meta = await sharp(firstSvgBuf).metadata();
-    outW = outW ?? meta.width  ?? 512;
-    outH = outH ?? meta.height ?? 512;
-  }
-
-  const bgColor = _parseBg(opts.background);
-
-  const encoder = new GifEncoder(outW, outH, "neuquant", true);
-  encoder.setDelay(frameDelay);
-  encoder.setRepeat(repeat);
-  encoder.setQuality(10);
-  encoder.start();
-
-  for (let f = 0; f < totalFrames; f++) {
-    let svgBuf: Buffer;
-    if (isSvgString || f === 0) {
-      svgBuf = firstSvgBuf;
-    } else {
-      const secs = (f / fps) % cycleDur;
-      const result = await QRCodeGenerate(input as Options, cachedMatrix, secs);
-      svgBuf = Buffer.from(result.svg, "utf-8");
-    }
-
-    const { data } = await sharp(svgBuf)
-      .resize(outW, outH, { fit: "contain", background: bgColor })
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-
-    encoder.addFrame(data);
-  }
-
-  encoder.finish();
-  return Buffer.from(encoder.out.getData());
-}
 
 function _parseBg(bg?: string): { r: number; g: number; b: number; alpha: number } {
   if (!bg || bg === "transparent") return { r: 0, g: 0, b: 0, alpha: 0 };
@@ -203,7 +117,139 @@ function _parseBg(bg?: string): { r: number; g: number; b: number; alpha: number
   return { r: 0, g: 0, b: 0, alpha: 0 };
 }
 
-/** @deprecated Use `exportQR(qrOptions, 'gif', gifOptions)` instead. */
+/** Parse width/height from SVG string without a full DOM parser. */
+function _svgDims(svg: string): { width: number; height: number } {
+  const wm = svg.match(/\bwidth=["']?([\d.]+)/);
+  const hm = svg.match(/\bheight=["']?([\d.]+)/);
+  const vb = svg.match(/viewBox=["']?\s*[\d.]+\s+[\d.]+\s+([\d.]+)\s+([\d.]+)/);
+  return {
+    width:  parseFloat(wm?.[1] ?? vb?.[1] ?? "512"),
+    height: parseFloat(hm?.[1] ?? vb?.[2] ?? "512"),
+  };
+}
+
+async function _svgToRgba(
+  svg: string,
+  width: number,
+  height: number,
+  bg: { r: number; g: number; b: number; alpha: number },
+): Promise<Uint8ClampedArray> {
+  // ── Browser path ──────────────────────────────────────────────────────────
+  if (typeof document !== "undefined") {
+    return new Promise<Uint8ClampedArray>((resolve, reject) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d")!;
+
+      if (bg.alpha > 0) {
+        ctx.fillStyle = `rgba(${bg.r},${bg.g},${bg.b},${bg.alpha})`;
+        ctx.fillRect(0, 0, width, height);
+      }
+
+      const img = new Image();
+      // Use object URL so embedded images (data URIs, GIFs) are preserved.
+      const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, width, height);
+        URL.revokeObjectURL(url);
+        resolve(ctx.getImageData(0, 0, width, height).data);
+      };
+      img.onerror = (e) => { URL.revokeObjectURL(url); reject(new Error("SVG render failed: " + e)); };
+      img.src = url;
+    });
+  }
+
+  // ── Node.js path (sharp) ──────────────────────────────────────────────────
+  let sharp: any;
+  try {
+    const m = await import("sharp");
+    sharp = m.default || m;
+  } catch {
+    throw new Error("The 'sharp' package is required for GIF export in Node.js.");
+  }
+  const svgBuf = Buffer.from(svg, "utf-8");
+  const { data } = await sharp(svgBuf)
+    .resize(width, height, { fit: "contain", background: bg })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  return new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength);
+}
+
+// ---------------------------------------------------------------------------
+// GIF encoder (gifenc — pure JS, works in browser + Node.js)
+// ---------------------------------------------------------------------------
+
+async function _encodeGIF(input: string | Options, opts: ExportOptions): Promise<Buffer> {
+  const { QRCodeGenerate, getAnimationDuration } = await import("./index");
+
+  let gifenc: any;
+  try {
+    gifenc = await import("gifenc");
+  } catch {
+    throw new Error("The 'gifenc' package is required for GIF export. Run: npm install gifenc");
+  }
+  const { GIFEncoder, quantize, applyPalette } = gifenc.default ?? gifenc;
+
+  const fps    = Math.max(1, Math.min(50, opts.fps    ?? 20));
+  const cycles = Math.max(1,              opts.cycles  ?? 1);
+  const repeat =                          opts.repeat  ?? 0;
+  const bg = _parseBg(opts.background);
+
+  const isSvgString = typeof input === "string";
+
+  // Determine animation cycle duration
+  let cycleDur = 0;
+  if (!isSvgString) {
+    const qrOpts = input as Options;
+    const animList = qrOpts.animation
+      ? (Array.isArray(qrOpts.animation) ? qrOpts.animation : [qrOpts.animation])
+      : [];
+    cycleDur = getAnimationDuration(animList);
+  }
+
+  const totalFrames = cycleDur > 0 ? Math.round(cycleDur * cycles * fps) : 1;
+  const frameDelay  = Math.round(1000 / fps); // gifenc uses ms
+
+  // Render first frame — also used to read intrinsic SVG dimensions.
+  const firstSvg = isSvgString
+    ? (input as string)
+    : (await QRCodeGenerate(input as Options, undefined, 0)).svg;
+
+  const cachedMatrix = isSvgString
+    ? undefined
+    : (await QRCodeGenerate(input as Options, undefined, 0)).matrix;
+
+  // Resolve output dimensions
+  const intrinsic = _svgDims(firstSvg);
+  const outW = opts.width  ?? intrinsic.width;
+  const outH = opts.height ?? intrinsic.height;
+
+  const gif = GIFEncoder();
+
+  for (let f = 0; f < totalFrames; f++) {
+    const svg = (f === 0 || isSvgString)
+      ? firstSvg
+      : (await QRCodeGenerate(input as Options, cachedMatrix, (f / fps) % cycleDur)).svg;
+
+    const rgba = await _svgToRgba(svg, outW, outH, bg);
+    const palette = quantize(rgba, 256, { format: "rgba4444" });
+    const index   = applyPalette(rgba, palette);
+
+    gif.writeFrame(index, outW, outH, {
+      palette,
+      delay: frameDelay,
+      repeat: f === 0 ? repeat : undefined,
+    });
+  }
+
+  gif.finish();
+  const bytes = gif.bytes();
+  return typeof Buffer !== "undefined" ? Buffer.from(bytes) : bytes as any;
+}
+
+/** @deprecated Use `exportQR(qrOptions, 'gif', options)` instead. */
 export async function exportGIF(
   qrOptions: Options,
   gifOptions: ExportOptions = {},
