@@ -109,7 +109,10 @@ export async function encodeGifFrames(
   } catch {
     throw new Error("The 'gifenc' package is required for GIF export. Run: npm install gifenc");
   }
-  const { GIFEncoder, quantize, applyPalette } = gifenc.default ?? gifenc;
+  // gifenc ESM: default export is the GIFEncoder function itself; named exports live on the namespace.
+  // gifenc CJS (Node): default is an object with all named exports.
+  const mod = gifenc.default && typeof gifenc.default === "object" ? gifenc.default : gifenc;
+  const { GIFEncoder, quantize, applyPalette } = mod;
 
   const gif = GIFEncoder();
   for (let i = 0; i < frames.length; i++) {
@@ -125,6 +128,61 @@ export async function encodeGifFrames(
 
   const bytes = gif.bytes();
   return typeof Buffer !== "undefined" ? Buffer.from(bytes) : bytes;
+}
+
+/** Browser: render SVG to PNG/JPEG/WEBP via canvas.toBlob. */
+export async function canvasRaster(
+  svg: string,
+  format: string,
+  opts: ExportOptions,
+): Promise<Uint8Array> {
+  const { width: svgW, height: svgH } = svgDims(svg);
+  const outW = opts.width  ?? svgW;
+  const outH = opts.height ?? svgH;
+
+  return new Promise<Uint8Array>((resolve, reject) => {
+    const canvas = document.createElement("canvas");
+    canvas.width  = outW;
+    canvas.height = outH;
+    const ctx = canvas.getContext("2d")!;
+
+    // JPEG has no alpha channel — fill white unless caller overrides
+    const bgStr = opts.background ?? (format === "jpeg" ? "#ffffff" : "transparent");
+    const bg = parseBg(bgStr);
+    if (bg.alpha > 0) {
+      ctx.fillStyle = `rgba(${bg.r},${bg.g},${bg.b},${bg.alpha})`;
+      ctx.fillRect(0, 0, outW, outH);
+    }
+
+    const svgBlob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(svgBlob);
+    const img = new Image();
+
+    img.onload = () => {
+      ctx.drawImage(img, 0, 0, outW, outH);
+      URL.revokeObjectURL(url);
+
+      const mime =
+        format === "jpeg" ? "image/jpeg" :
+        format === "webp" ? "image/webp" :
+        "image/png";
+      const quality = (opts.quality ?? 90) / 100;
+
+      canvas.toBlob(
+        (b) => {
+          if (!b) { reject(new Error("[exportQR] canvas.toBlob failed")); return; }
+          b.arrayBuffer().then((buf) => resolve(new Uint8Array(buf))).catch(reject);
+        },
+        mime,
+        quality,
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("[exportQR] SVG render failed"));
+    };
+    img.src = url;
+  });
 }
 
 /** Node.js only: render SVG to PNG/JPEG/WEBP via sharp. */

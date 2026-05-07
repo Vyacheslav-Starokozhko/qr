@@ -24,7 +24,7 @@ import {
 import { detectFrameInset } from "./frame-inset";
 import {
   FileExtension, ExportOptions,
-  parseBg, svgDims, svgToRgba, encodeGifFrames, sharpRaster,
+  parseBg, svgDims, svgToRgba, encodeGifFrames, sharpRaster, canvasRaster,
 } from "./export";
 import { defaultOptions } from "./default";
 
@@ -54,27 +54,72 @@ export async function exportQR(
   format: FileExtension,
   options: ExportOptions = {},
 ): Promise<Buffer | Uint8Array> {
-  // SVG passthrough
+  // GIF has no true alpha — always ensure a solid background.
+  // Priority: caller's explicit `options.background` → QR's own bg color → white.
+  if (format === "gif") {
+    const gifOptions = options.background
+      ? options
+      : { ...options, background: _inferGifBg(input) };
+    return _gifExport(input, gifOptions);
+  }
+
+  // All other formats: resolve to an SVG string first
+  const svg = typeof input === "string"
+    ? input
+    : (await QRCodeGenerate(input)).svg;
+
   if (format === "svg") {
-    const svg = typeof input === "string" ? input : "";
     return typeof Buffer !== "undefined"
       ? Buffer.from(svg, "utf-8")
       : new TextEncoder().encode(svg);
   }
 
-  // Raster (Node.js / sharp)
   if (format === "png" || format === "jpeg" || format === "webp") {
-    if (typeof input !== "string")
-      throw new Error("[exportQR] Pass a pre-rendered SVG string for png/jpeg/webp.");
-    return sharpRaster(input, format, options);
-  }
-
-  // GIF (browser + Node.js)
-  if (format === "gif") {
-    return _gifExport(input, options);
+    // Browser: canvas API
+    if (typeof document !== "undefined") {
+      return canvasRaster(svg, format, options);
+    }
+    // Node.js: sharp
+    return sharpRaster(svg, format, options);
   }
 
   throw new Error(`[exportQR] Unknown format: "${format}". Use: svg | png | jpeg | webp | gif`);
+}
+
+/** sRGB hex → WCAG relative luminance (0–1). */
+function _luminance(hex: string): number {
+  const { r, g, b } = parseBg(hex);
+  const lin = (c: number) => { const s = c / 255; return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); };
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+
+/** Pick the representative dot color (flat or first gradient stop). */
+function _dotColor(opts: Options): string {
+  const d = opts.dotsOptions;
+  if (d?.gradient?.colorStops?.length) return d.gradient.colorStops[0].color ?? "#000000";
+  return d?.color ?? "#000000";
+}
+
+/**
+ * Infer a solid GIF background that contrasts with the QR's dot color.
+ * Priority: explicit bg color on the options → contrast-safe fallback (white or black).
+ */
+function _inferGifBg(input: string | Options): string {
+  if (typeof input === "string") return "#ffffff";
+  const qrOpts = input as Options;
+  // Explicit non-transparent bg — use it directly.
+  if (qrOpts.backgroundEnable !== false) {
+    const c = qrOpts.backgroundOptions?.color;
+    if (c && c !== "transparent") return c;
+  }
+  // No bg (or transparent) — pick white or black based on dot luminance.
+  const dotLum = _luminance(_dotColor(qrOpts));
+  // WCAG contrast ratio = (lighter + 0.05) / (darker + 0.05).
+  // White bg lum = 1 → ratio with dots = (1.05) / (dotLum + 0.05).
+  // Black bg lum = 0 → ratio with dots = (dotLum + 0.05) / 0.05.
+  const contrastOnWhite = 1.05 / (dotLum + 0.05);
+  const contrastOnBlack = (dotLum + 0.05) / 0.05;
+  return contrastOnWhite >= contrastOnBlack ? "#ffffff" : "#000000";
 }
 
 /** @deprecated Use `exportQR(qrOptions, 'gif', options)` instead. */

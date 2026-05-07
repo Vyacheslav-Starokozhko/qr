@@ -638,6 +638,21 @@ export function randomizeOptions(
     if (anims.length > 0) result.animation = anims;
   }
 
+  // --- background guarantee ---
+  // Animations and effects need a solid background:
+  //   • GIF export corrupts without one (no true alpha in GIF format)
+  //   • Visual effects (neon-glow, blend, liquid) look broken on transparent
+  // If the user didn't request backgroundColor randomisation but did request
+  // effects/animation, silently add a background that fits the theme.
+  if (result.effects || result.animation) {
+    const hasBg = !!(result.backgroundOptions?.color || result.backgroundOptions?.gradient);
+    if (!hasBg) {
+      const fill = gen.bgFill(isDark, rng);
+      result.backgroundOptions = { ...result.backgroundOptions, ...fill };
+      result.backgroundEnable = true;
+    }
+  }
+
   return normalizeOptions(result);
 }
 
