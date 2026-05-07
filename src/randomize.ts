@@ -8,6 +8,8 @@ import {
   QrShape,
   QrDecorationBuiltinShape,
   QrDecorationPlacement,
+  QrEffect,
+  QrAnimation,
 } from "./types";
 
 /**
@@ -60,6 +62,38 @@ export type RandomizeTuning = {
     maskTypes?: Array<"stripe" | "zigzag" | "wave" | "checker">;
     /** Allowed stripe angles in degrees. Default [0, 30, 45, 60, 90, 120, 135, 150] */
     stripeAngles?: number[];
+  };
+
+  /** Effect generation tuning. */
+  effects?: {
+    /** Chance of adding a drop-shadow (0–1, default 0.25) */
+    dropShadowChance?: number;
+    /** Chance of adding a neon-glow (0–1, default 0.20) */
+    neonGlowChance?: number;
+    /** Chance of adding a morphology dilate/erode (0–1, default 0.20) */
+    morphologyChance?: number;
+    /** Chance of adding a liquid/metaball effect (0–1, default 0.15) */
+    liquidChance?: number;
+    /** Chance of adding a blend-mode overlay (0–1, default 0.20) */
+    blendChance?: number;
+    /** Max total effects to stack (default 2) */
+    maxEffects?: number;
+  };
+
+  /** Animation generation tuning. */
+  animations?: {
+    /** Chance of generating a pulse animation (0–1, default 0.30) */
+    pulseChance?: number;
+    /** Chance of generating a shimmer animation (0–1, default 0.30) */
+    shimmerChance?: number;
+    /** Chance of generating a draw animation (0–1, default 0.20) */
+    drawChance?: number;
+    /** Chance of generating a glow animation (0–1, default 0.20) */
+    glowChance?: number;
+    /** Max total animations to stack (default 2) */
+    maxAnimations?: number;
+    /** Duration range [min, max] seconds. Default [1.5, 4] */
+    durationRange?: [number, number];
   };
 
   /** Shape pools — restrict which shapes each part can pick. */
@@ -115,6 +149,11 @@ export type RandomizeConfig = {
   borderRadius?: boolean;
   /** Generate random decoration layers in the QR margin */
   decorations?: boolean;
+  /** Randomize SVG filter effects (drop-shadow, neon-glow, morphology, liquid, blend) */
+  effects?: boolean;
+  /** Randomize SVG animations (pulse, shimmer, draw, glow) */
+  animation?: boolean;
+
   /** @deprecated Use `dotsOverlays` instead */
   dotsPattern?: boolean;
   /** @deprecated Use `cornersDotOverlays` instead */
@@ -186,10 +225,17 @@ type RT = {
   maskTypes: QrOverlayMask["type"][]; stripeAngles: number[];
   dotFigures: string[]; dotIcons: string[]; dotIconChance: number;
   innerEye: string[]; outerEye: string[];
+  // effects
+  fxDropShadow: number; fxNeonGlow: number; fxMorphology: number;
+  fxLiquid: number; fxBlend: number; fxMax: number;
+  // animations
+  anPulse: number; anShimmer: number; anDraw: number; anGlow: number;
+  anMax: number; anDurRange: [number,number];
 };
 
 function resolveT(t?: RandomizeTuning): RT {
   const c = t?.colors; const o = t?.overlays; const s = t?.shapes;
+  const e = t?.effects; const a = t?.animations;
   return {
     darkThemeChance:  t?.darkThemeChance    ?? 0.45,
     gradientChance:   t?.gradientChance     ?? 0.60,
@@ -215,6 +261,18 @@ function resolveT(t?: RandomizeTuning): RT {
     dotIconChance: s?.dotIconChance ?? 0.5,
     innerEye: s?.innerEye ?? [...INNER_EYE_SHAPES],
     outerEye: s?.outerEye ?? [...OUTER_EYE_SHAPES],
+    fxDropShadow: e?.dropShadowChance  ?? 0.25,
+    fxNeonGlow:   e?.neonGlowChance    ?? 0.20,
+    fxMorphology: e?.morphologyChance  ?? 0.20,
+    fxLiquid:     e?.liquidChance      ?? 0.15,
+    fxBlend:      e?.blendChance       ?? 0.20,
+    fxMax:        e?.maxEffects        ?? 2,
+    anPulse:   a?.pulseChance    ?? 0.30,
+    anShimmer: a?.shimmerChance  ?? 0.30,
+    anDraw:    a?.drawChance     ?? 0.20,
+    anGlow:    a?.glowChance     ?? 0.20,
+    anMax:     a?.maxAnimations  ?? 2,
+    anDurRange: a?.durationRange ?? [1.5, 4],
   };
 }
 
@@ -310,6 +368,105 @@ function makeGen(tc: RT) {
     }));
   }
 
+  const BLEND_MODES = [
+    "screen", "multiply", "overlay", "darken", "lighten",
+    "hard-light", "soft-light", "color-dodge", "color-burn", "difference", "exclusion",
+  ] as const;
+  const EFFECT_TARGETS = ["dots", "eyes", "all"] as const;
+  const ANIM_TARGETS_PULSE = ["dots", "eyes", "all"] as const;
+  const ANIM_TARGETS_SHIMMER = ["dots", "eyes"] as const;
+  const DRAW_DIRS = ["ltr", "ttb", "rtl", "btt"] as const;
+
+  function randomColor(rng: () => number): string {
+    return hslToHex(Math.floor(rng() * 360), 70 + Math.floor(rng() * 30), 50 + Math.floor(rng() * 20));
+  }
+
+  function randomEffects(rng: () => number): QrEffect[] {
+    const out: QrEffect[] = [];
+    const dur = (lo: number, hi: number) => lo + rng() * (hi - lo);
+
+    if (rng() < tc.fxDropShadow && out.length < tc.fxMax) {
+      out.push({
+        type: "drop-shadow",
+        target: pick(EFFECT_TARGETS, rng),
+        dx: (rng() * 3 - 1.5),
+        dy: (rng() * 3 - 1.5),
+        blur: dur(0.5, 2.5),
+        color: randomColor(rng),
+        opacity: 0.4 + rng() * 0.5,
+      });
+    }
+    if (rng() < tc.fxNeonGlow && out.length < tc.fxMax) {
+      out.push({
+        type: "neon-glow",
+        target: pick(EFFECT_TARGETS, rng),
+        color: randomColor(rng),
+        spread: dur(0.5, 2),
+        intensity: dur(1.5, 4),
+      });
+    }
+    if (rng() < tc.fxMorphology && out.length < tc.fxMax) {
+      out.push({
+        type: "morphology",
+        target: rng() < 0.7 ? "dots" : "eyes",
+        operator: rng() < 0.6 ? "dilate" : "erode",
+        radius: dur(0.1, 0.5),
+      });
+    }
+    if (rng() < tc.fxLiquid && out.length < tc.fxMax) {
+      out.push({
+        type: "liquid",
+        target: "dots",
+        blur: dur(0.8, 1.8),
+        threshold: 0.25 + rng() * 0.25,
+      });
+    }
+    if (rng() < tc.fxBlend && out.length < tc.fxMax) {
+      out.push({
+        type: "blend",
+        target: pick(EFFECT_TARGETS, rng),
+        mode: pick(BLEND_MODES, rng),
+        color: randomColor(rng),
+        opacity: 0.3 + rng() * 0.5,
+      });
+    }
+    return out;
+  }
+
+  function randomAnimations(rng: () => number): QrAnimation[] {
+    const out: QrAnimation[] = [];
+    const [durMin, durMax] = tc.anDurRange;
+    const dur = () => +(durMin + rng() * (durMax - durMin)).toFixed(2);
+    const delay = () => rng() < 0.4 ? +(rng() * 0.5).toFixed(2) : 0;
+
+    if (rng() < tc.anPulse && out.length < tc.anMax) {
+      out.push({ type: "pulse", target: pick(ANIM_TARGETS_PULSE, rng), duration: dur(), delay: delay() });
+    }
+    if (rng() < tc.anShimmer && out.length < tc.anMax) {
+      out.push({
+        type: "shimmer",
+        color: randomColor(rng),
+        opacity: 0.2 + rng() * 0.5,
+        duration: dur(),
+        delay: delay(),
+        direction: rng() < 0.5 ? "ltr" : "ttb",
+      });
+    }
+    if (rng() < tc.anDraw && out.length < tc.anMax) {
+      out.push({ type: "draw", direction: pick(DRAW_DIRS, rng), duration: dur(), delay: delay() });
+    }
+    if (rng() < tc.anGlow && out.length < tc.anMax) {
+      out.push({
+        type: "glow",
+        color: randomColor(rng),
+        intensity: 1 + rng() * 3,
+        duration: dur(),
+        delay: delay(),
+      });
+    }
+    return out;
+  }
+
   return {
     darkC,
     vividC,
@@ -318,6 +475,8 @@ function makeGen(tc: RT) {
     layerFill,
     maskLayers,
     overlays,
+    randomEffects,
+    randomAnimations,
     dotShape: (rng: () => number) =>
       rng() < tc.dotIconChance
         ? { type: "icon" as const, path: pick(tc.dotIcons, rng) as string }
@@ -467,6 +626,18 @@ export function randomizeOptions(
     }));
   }
 
+  // --- effects ---
+  if (config.effects) {
+    const fx = gen.randomEffects(rng);
+    if (fx.length > 0) result.effects = fx;
+  }
+
+  // --- animation ---
+  if (config.animation) {
+    const anims = gen.randomAnimations(rng);
+    if (anims.length > 0) result.animation = anims;
+  }
+
   return normalizeOptions(result);
 }
 
@@ -568,7 +739,7 @@ function _partLum(part: QrPartOptions | undefined): number | null {
   if (!part) return null;
   if (part.overlays?.length) {
     const base = part.overlays.find((o) => !o.mask);
-    if (base) return base.fill.type === "color" ? _hexLum(base.fill.color) : _gradLum(base.fill.gradient);
+    if (base) return base.fill.type === "color" ? _hexLum(base.fill.color) : base.fill.type === "gradient" ? _gradLum(base.fill.gradient) : 1;
   }
   if (part.gradient) return _gradLum(part.gradient);
   if (part.color !== undefined) return _hexLum(part.color);
@@ -592,7 +763,8 @@ function _adjustGradient(g: Gradient, bgLum: number, minRatio: number, darker: b
 
 function _adjustFill(fill: QrLayerFill, bgLum: number, minRatio: number, darker: boolean): QrLayerFill {
   if (fill.type === "color") return { type: "color", color: _adjustColor(fill.color, bgLum, minRatio, darker) };
-  return { type: "gradient", gradient: _adjustGradient(fill.gradient, bgLum, minRatio, darker) };
+  if (fill.type === "gradient") return { type: "gradient", gradient: _adjustGradient(fill.gradient, bgLum, minRatio, darker) };
+  return fill; // image fills are not adjusted
 }
 
 function _adjustPart(
@@ -612,7 +784,7 @@ function _adjustPart(
       // If their color blends into the background, those dot regions become invisible to scanners.
       const opacity = o.opacity ?? 1;
       if (opacity >= 0.5) {
-        const lum = o.fill.type === "color" ? _hexLum(o.fill.color) : _gradLum(o.fill.gradient);
+        const lum = o.fill.type === "color" ? _hexLum(o.fill.color) : o.fill.type === "gradient" ? _gradLum(o.fill.gradient) : 1;
         if (_wcag(lum, bgLum) < minRatio) {
           return { ...o, fill: _adjustFill(o.fill, bgLum, minRatio, darker) };
         }
@@ -633,7 +805,7 @@ function _hasProblematicMaskedLayer(part: QrPartOptions | undefined, bgLum: numb
     if (!o.mask) return false;
     const opacity = o.opacity ?? 1;
     if (opacity < 0.5) return false;
-    const lum = o.fill.type === "color" ? _hexLum(o.fill.color) : _gradLum(o.fill.gradient);
+    const lum = o.fill.type === "color" ? _hexLum(o.fill.color) : o.fill.type === "gradient" ? _gradLum(o.fill.gradient) : 1;
     return _wcag(lum, bgLum) < minRatio;
   });
 }
@@ -698,7 +870,8 @@ function invertGradient(g: Gradient): Gradient {
 
 function invertLayerFill(fill: QrLayerFill): QrLayerFill {
   if (fill.type === "color") return { type: "color", color: invertHex(fill.color) };
-  return { type: "gradient", gradient: invertGradient(fill.gradient) };
+  if (fill.type === "gradient") return { type: "gradient", gradient: invertGradient(fill.gradient) };
+  return fill; // image fills are not inverted
 }
 
 function invertPart(part: QrPartOptions | undefined): QrPartOptions | undefined {

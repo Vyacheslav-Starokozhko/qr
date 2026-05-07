@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(node -e ' *)",
-      "Bash(node --input-type=module)"
+      "Bash(node --input-type=module)",
+      "Bash(node test2.js)",
+      "Bash(rm -f anim-*.svg debug_frame.png)",
+      "Bash(npm version *)",
+      "Bash(node -e \"import\\('gif-encoder-2'\\).then\\(m => console.log\\('ok', Object.keys\\(m\\)\\)\\)\")"
     ]
   }
 }

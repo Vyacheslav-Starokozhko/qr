@@ -18,12 +18,14 @@ import {
   QRMatrix,
   QrOverlay,
   QrOverlayMask,
+  QrAnimation,
+  QrEffect,
 } from "./types";
 import { detectFrameInset } from "./frame-inset";
-import { exportQR, FileExtension, ExportOptions } from "./export";
+import { exportQR, exportGIF, FileExtension, ExportOptions } from "./export";
 import { defaultOptions } from "./default";
 
-export { exportQR, QRShapes, FileExtension, ExportOptions };
+export { exportQR, exportGIF, QRShapes, FileExtension, ExportOptions };
 
 export * from "./types";
 export { randomizeOptions, invertOptions, normalizeOptions } from "./randomize";
@@ -185,6 +187,14 @@ function generateOverlayLayerDef(
     const gradId = `overlay-grad-${id}`;
     defs += generateGradientDef(gradId, layer.fill.gradient, 0, 0, fullSize, fullSize);
     fillRef = `url(#${gradId})`;
+  } else if (layer.fill.type === "image") {
+    const patId = `overlay-img-${id}`;
+    const pw = layer.fill.width ?? fullSize;
+    const ph = layer.fill.height ?? fullSize;
+    defs += `<pattern id="${patId}" x="0" y="0" width="${pw}" height="${ph}" patternUnits="userSpaceOnUse">
+      <image href="${layer.fill.source}" x="0" y="0" width="${pw}" height="${ph}" preserveAspectRatio="xMidYMid slice"/>
+    </pattern>`;
+    fillRef = `url(#${patId})`;
   } else {
     fillRef = layer.fill.color;
   }
@@ -204,6 +214,15 @@ function createSymbol(id: string, part: QrPartOptions): string {
 
   if (shape.type === "figure") {
     return "";
+  }
+
+  if (shape.type === "image-icon") {
+    const par = shape.preserveAspectRatio ?? "xMidYMid slice";
+    return `
+        <symbol id="${id}" viewBox="0 0 1 1">
+          <image href="${shape.source}" x="0" y="0" width="1" height="1" preserveAspectRatio="${par}"/>
+        </symbol>
+      `;
   }
 
   if (shape.type === "custom-icon" && shape.path) {
@@ -644,6 +663,8 @@ interface QRGenerateResultBase {
 
 export interface QRGenerateResult extends QRGenerateResultBase {
   svg: string;
+  /** The raw QR matrix — can be passed back as `_cachedMatrix` to skip re-encoding. */
+  matrix: QRMatrix;
   /** Rendered canvas. `null` in non-browser environments (Node.js). */
   canvas: HTMLCanvasElement | null;
   /**
@@ -1048,9 +1069,324 @@ function prefixSvgIds(svg: string, prefix: string): string {
   return svg;
 }
 
+// ---------------------------------------------------------------------------
+// Animation builder
+// ---------------------------------------------------------------------------
+
+function parseHexToRgb01(color: string): [number, number, number] {
+  const m = color.match(/^#([0-9a-f]{3,8})$/i);
+  if (!m) return [0.267, 0.533, 1];
+  let hex = m[1];
+  if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+  const n = parseInt(hex.slice(0, 6), 16);
+  return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255];
+}
+
+type AnimWrap = (s: string) => string;
+const identity: AnimWrap = (s) => s;
+
+// Linear interpolation helper
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+// Triangular wave: values="vTo;vFrom;vTo" → goes vTo→vFrom→vTo over one cycle
+function triangleWave(vTo: number, vFrom: number, cycleFrac: number): number {
+  const x = ((cycleFrac % 1) + 1) % 1;
+  return x <= 0.5 ? lerp(vTo, vFrom, x * 2) : lerp(vFrom, vTo, (x - 0.5) * 2);
+}
+
+// Returns the animation cycle duration in seconds (longest repeating animation)
+export function getAnimationDuration(animations: QrAnimation[]): number {
+  let max = 0;
+  for (const a of animations) {
+    const dur = a.duration ?? (a.type === "draw" ? 1.5 : a.type === "shimmer" ? 2.5 : 2);
+    if (a.type === "draw" && a.repeat === false) continue; // one-shot, don't drive loop
+    max = Math.max(max, dur);
+  }
+  return max > 0 ? max : 0;
+}
+
+function buildAnimations(
+  animations: QrAnimation[],
+  fullSize: number,
+  uid: string,
+  dotColor: string,
+  /** When set (seconds elapsed), generate a static snapshot at that time instead of animated SVG */
+  frameSecs?: number,
+): {
+  defs: string;
+  wrapDots: AnimWrap;
+  wrapEyes: AnimWrap;
+  wrapContent: AnimWrap;
+  overlay: string;
+} {
+  const isFrame = frameSecs !== undefined;
+  let defs = "";
+  let overlay = "";
+  let wrapDots: AnimWrap = identity;
+  let wrapEyes: AnimWrap = identity;
+  let wrapContent: AnimWrap = identity;
+
+  for (const anim of animations) {
+    const rc =
+      anim.repeat === false ? "1"
+      : anim.repeat === true || anim.repeat == null ? "indefinite"
+      : String(anim.repeat);
+    const delay = anim.delay ?? 0;
+
+    if (anim.type === "pulse") {
+      const dur   = anim.duration ?? 2;
+      const vFrom = anim.from ?? 0.4;
+      const vTo   = anim.to   ?? 1.0;
+      const target = anim.target ?? "eyes";
+      let wrap: AnimWrap;
+      if (isFrame) {
+        const secs = Math.max(0, frameSecs! - delay);
+        const op = triangleWave(vTo, vFrom, secs / dur);
+        wrap = (s) => s ? `<g opacity="${op.toFixed(4)}">${s}</g>` : s;
+      } else {
+        const tag = `<animate attributeName="opacity" values="${vTo};${vFrom};${vTo}" dur="${dur}s" begin="${delay}s" repeatCount="${rc}"/>`;
+        wrap = (s) => s ? `<g>${tag}${s}</g>` : s;
+      }
+      if (target === "eyes" || target === "all") wrapEyes = wrap;
+      if (target === "dots" || target === "all") wrapDots = wrap;
+
+    } else if (anim.type === "shimmer") {
+      const dur   = anim.duration  ?? 2.5;
+      const color = anim.color     ?? "#ffffff";
+      const op    = anim.opacity   ?? 0.35;
+      const dir   = anim.direction ?? "ltr";
+      const gid   = `qr-shimmer-${uid}`;
+      const isH   = dir === "ltr";
+      const stops = `<stop offset="0%" stop-color="${color}" stop-opacity="0"/>
+          <stop offset="40%" stop-color="${color}" stop-opacity="${op}"/>
+          <stop offset="60%" stop-color="${color}" stop-opacity="${op}"/>
+          <stop offset="100%" stop-color="${color}" stop-opacity="0"/>`;
+      if (isFrame) {
+        const secs = Math.max(0, frameSecs! - delay);
+        const phase = (secs % dur) / dur; // saw wave [0,1)
+        if (isH) {
+          const x1 = -fullSize + phase * 2 * fullSize;
+          const x2 = x1 + fullSize;
+          defs += `<linearGradient id="${gid}" gradientUnits="userSpaceOnUse" x1="${x1.toFixed(2)}" y1="0" x2="${x2.toFixed(2)}" y2="0">${stops}</linearGradient>`;
+        } else {
+          const y1 = -fullSize + phase * 2 * fullSize;
+          const y2 = y1 + fullSize;
+          defs += `<linearGradient id="${gid}" gradientUnits="userSpaceOnUse" x1="0" y1="${y1.toFixed(2)}" x2="0" y2="${y2.toFixed(2)}">${stops}</linearGradient>`;
+        }
+      } else if (isH) {
+        defs += `<linearGradient id="${gid}" gradientUnits="userSpaceOnUse" x1="${-fullSize}" y1="0" x2="0" y2="0">
+          ${stops}
+          <animate attributeName="x1" values="${-fullSize};${fullSize}"  dur="${dur}s" repeatCount="${rc}" begin="${delay}s" calcMode="linear"/>
+          <animate attributeName="x2" values="0;${fullSize * 2}"         dur="${dur}s" repeatCount="${rc}" begin="${delay}s" calcMode="linear"/>
+        </linearGradient>`;
+      } else {
+        defs += `<linearGradient id="${gid}" gradientUnits="userSpaceOnUse" x1="0" y1="${-fullSize}" x2="0" y2="0">
+          ${stops}
+          <animate attributeName="y1" values="${-fullSize};${fullSize}"  dur="${dur}s" repeatCount="${rc}" begin="${delay}s" calcMode="linear"/>
+          <animate attributeName="y2" values="0;${fullSize * 2}"         dur="${dur}s" repeatCount="${rc}" begin="${delay}s" calcMode="linear"/>
+        </linearGradient>`;
+      }
+      overlay += `<rect width="${fullSize}" height="${fullSize}" fill="url(#${gid})" style="pointer-events:none"/>`;
+
+    } else if (anim.type === "draw") {
+      const dur = anim.duration ?? 1.5;
+      const dir = anim.direction ?? "ltr";
+      const cid = `qr-draw-${uid}`;
+      if (isFrame) {
+        const secs = Math.max(0, frameSecs! - delay);
+        const progress = Math.min(secs / dur, 1);
+        const dw = (fullSize * progress).toFixed(3);
+        const dh = (fullSize * progress).toFixed(3);
+        if (dir === "ltr")
+          defs += `<clipPath id="${cid}"><rect x="0" y="0" width="${dw}" height="${fullSize}"/></clipPath>`;
+        else if (dir === "ttb")
+          defs += `<clipPath id="${cid}"><rect x="0" y="0" width="${fullSize}" height="${dh}"/></clipPath>`;
+        else if (dir === "rtl")
+          defs += `<clipPath id="${cid}"><rect x="${(fullSize * (1 - progress)).toFixed(3)}" y="0" width="${dw}" height="${fullSize}"/></clipPath>`;
+        else // btt
+          defs += `<clipPath id="${cid}"><rect x="0" y="${(fullSize * (1 - progress)).toFixed(3)}" width="${fullSize}" height="${dh}"/></clipPath>`;
+      } else {
+        if (dir === "ltr")
+          defs += `<clipPath id="${cid}"><rect x="0" y="0" height="${fullSize}" width="0"><animate attributeName="width"  from="0" to="${fullSize}" dur="${dur}s" fill="freeze" begin="${delay}s"/></rect></clipPath>`;
+        else if (dir === "ttb")
+          defs += `<clipPath id="${cid}"><rect x="0" y="0" width="${fullSize}" height="0"><animate attributeName="height" from="0" to="${fullSize}" dur="${dur}s" fill="freeze" begin="${delay}s"/></rect></clipPath>`;
+        else if (dir === "rtl")
+          defs += `<clipPath id="${cid}"><rect x="${fullSize}" y="0" height="${fullSize}" width="0"><animate attributeName="x" from="${fullSize}" to="0" dur="${dur}s" fill="freeze" begin="${delay}s"/><animate attributeName="width" from="0" to="${fullSize}" dur="${dur}s" fill="freeze" begin="${delay}s"/></rect></clipPath>`;
+        else // btt
+          defs += `<clipPath id="${cid}"><rect x="0" y="${fullSize}" width="${fullSize}" height="0"><animate attributeName="y" from="${fullSize}" to="0" dur="${dur}s" fill="freeze" begin="${delay}s"/><animate attributeName="height" from="0" to="${fullSize}" dur="${dur}s" fill="freeze" begin="${delay}s"/></rect></clipPath>`;
+      }
+      const prev = wrapContent;
+      wrapContent = (s) => prev(`<g clip-path="url(#${cid})">${s}</g>`);
+
+    } else if (anim.type === "glow") {
+      const dur       = anim.duration  ?? 2;
+      const glowColor = anim.color     ?? dotColor;
+      const intensity = anim.intensity ?? 3;
+      const fid       = `qr-glow-${uid}`;
+      const [r, g, b] = parseHexToRgb01(glowColor);
+      const cm = `values="0 0 0 0 ${r.toFixed(4)}  0 0 0 0 ${g.toFixed(4)}  0 0 0 0 ${b.toFixed(4)}  0 0 0 0.85 0"`;
+      if (isFrame) {
+        const secs = Math.max(0, frameSecs! - delay);
+        const sd = triangleWave(0, intensity, secs / dur).toFixed(4);
+        defs += `<filter id="${fid}" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="${sd}" result="blur"/>
+          <feColorMatrix in="blur" type="matrix" ${cm} result="tinted"/>
+          <feMerge><feMergeNode in="tinted"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>`;
+      } else {
+        defs += `<filter id="${fid}" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">
+          <feGaussianBlur in="SourceGraphic" result="blur">
+            <animate attributeName="stdDeviation" values="0;${intensity};0" dur="${dur}s" repeatCount="${rc}" begin="${delay}s"/>
+          </feGaussianBlur>
+          <feColorMatrix in="blur" type="matrix" ${cm} result="tinted"/>
+          <feMerge><feMergeNode in="tinted"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>`;
+      }
+      const prevD = wrapDots, prevE = wrapEyes;
+      wrapDots = (s) => prevD(`<g filter="url(#${fid})">${s}</g>`);
+      wrapEyes = (s) => prevE(`<g filter="url(#${fid})">${s}</g>`);
+    }
+  }
+
+  return { defs, wrapDots, wrapEyes, wrapContent, overlay };
+}
+
+function buildEffects(
+  effects: QrEffect[],
+  fullSize: number,
+  uid: string,
+  dotColor: string,
+): {
+  defs: string;
+  wrapDots: AnimWrap;
+  wrapEyes: AnimWrap;
+  wrapAll: AnimWrap;   // wraps background + dots + eyes + images inside clip group
+  overlay: string;     // blend-mode rects placed after all content
+} {
+  let defs = "";
+  let overlay = "";
+  let wrapDots: AnimWrap = identity;
+  let wrapEyes: AnimWrap = identity;
+  let wrapAll:  AnimWrap = identity;
+
+  for (let i = 0; i < effects.length; i++) {
+    const fx  = effects[i];
+    const fid = `qr-fx${i}-${uid}`;
+    // When target is "all", apply the filter to the entire content group —
+    // DON'T also apply it to dots/eyes individually (they're already inside it).
+    const isAll = fx.type !== "blend" && (fx.target === "all" || (fx.type === "drop-shadow" && !fx.target));
+    const toDots = !isAll && (fx.target === "dots" || !fx.target || fx.type === "liquid" || fx.type === "morphology");
+    const toEyes = !isAll && (fx.target === "eyes");
+
+    switch (fx.type) {
+      case "drop-shadow": {
+        const dx  = fx.dx      ?? 1.5;
+        const dy  = fx.dy      ?? 1.5;
+        const bl  = fx.blur    ?? 1.5;
+        const col = fx.color   ?? "#000000";
+        const op  = fx.opacity ?? 0.45;
+        defs += `<filter id="${fid}" x="-40%" y="-40%" width="180%" height="180%">
+          <feDropShadow dx="${dx}" dy="${dy}" stdDeviation="${bl}" flood-color="${col}" flood-opacity="${op}"/>
+        </filter>`;
+        const wrap: AnimWrap = (s) => s ? `<g filter="url(#${fid})">${s}</g>` : s;
+        if (isAll) { const p = wrapAll;  wrapAll  = (s) => p(wrap(s)); }
+        if (toDots) { const p = wrapDots; wrapDots = (s) => p(wrap(s)); }
+        if (toEyes) { const p = wrapEyes; wrapEyes = (s) => p(wrap(s)); }
+        break;
+      }
+
+      case "neon-glow": {
+        const glowCol   = fx.color     ?? dotColor;
+        const intensity = fx.intensity ?? 2;
+        const spread    = fx.spread    ?? intensity * 2.5;
+        const [r, g, b] = parseHexToRgb01(glowCol);
+        const rf = r.toFixed(4), gf = g.toFixed(4), bf = b.toFixed(4);
+        defs += `<filter id="${fid}" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="${spread.toFixed(2)}" result="wide"/>
+          <feGaussianBlur in="SourceGraphic" stdDeviation="${intensity.toFixed(2)}" result="tight"/>
+          <feColorMatrix in="wide"  type="matrix" values="0 0 0 0 ${rf} 0 0 0 0 ${gf} 0 0 0 0 ${bf} 0 0 0 0.55 0" result="wc"/>
+          <feColorMatrix in="tight" type="matrix" values="0 0 0 0 ${rf} 0 0 0 0 ${gf} 0 0 0 0 ${bf} 0 0 0 1 0"    result="tc"/>
+          <feMerge><feMergeNode in="wc"/><feMergeNode in="tc"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>`;
+        const useAll  = fx.target === "all" || !fx.target;
+        const useDots = fx.target === "dots";
+        const useEyes = fx.target === "eyes";
+        const wrap: AnimWrap = (s) => s ? `<g filter="url(#${fid})">${s}</g>` : s;
+        if (useAll)  { const p = wrapAll;  wrapAll  = (s) => p(wrap(s)); }
+        if (useDots) { const p = wrapDots; wrapDots = (s) => p(wrap(s)); }
+        if (useEyes) { const p = wrapEyes; wrapEyes = (s) => p(wrap(s)); }
+        break;
+      }
+
+      case "morphology": {
+        const op  = fx.operator ?? "dilate";
+        const rad = fx.radius   ?? 0.3;
+        defs += `<filter id="${fid}">
+          <feMorphology operator="${op}" radius="${rad.toFixed(3)}"/>
+        </filter>`;
+        const wrap: AnimWrap = (s) => s ? `<g filter="url(#${fid})">${s}</g>` : s;
+        // Default target for morphology is "dots"
+        const useAll  = fx.target === "all";
+        const useDots = fx.target === "dots" || !fx.target;
+        const useEyes = fx.target === "eyes";
+        if (useAll)  { const p = wrapAll;  wrapAll  = (s) => p(wrap(s)); }
+        if (useDots) { const p = wrapDots; wrapDots = (s) => p(wrap(s)); }
+        if (useEyes) { const p = wrapEyes; wrapEyes = (s) => p(wrap(s)); }
+        break;
+      }
+
+      case "liquid": {
+        const blur      = fx.blur      ?? 1.2;
+        const threshold = fx.threshold ?? 0.35;
+        // Alpha row: new_a = K*old_a + C. Threshold point = -C/K.
+        const K = 18;
+        const C = -(threshold * K);
+        defs += `<filter id="${fid}" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="${blur.toFixed(3)}" result="blur"/>
+          <feColorMatrix in="blur" type="matrix"
+            values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 ${K} ${C.toFixed(4)}"
+            result="mask"/>
+          <feComposite in="SourceGraphic" in2="mask" operator="in"/>
+        </filter>`;
+        // Default target for liquid is "dots"
+        const useAll  = fx.target === "all";
+        const useDots = fx.target === "dots" || !fx.target;
+        const useEyes = fx.target === "eyes";
+        const wrap: AnimWrap = (s) => s ? `<g filter="url(#${fid})">${s}</g>` : s;
+        if (useAll)  { const p = wrapAll;  wrapAll  = (s) => p(wrap(s)); }
+        if (useDots) { const p = wrapDots; wrapDots = (s) => p(wrap(s)); }
+        if (useEyes) { const p = wrapEyes; wrapEyes = (s) => p(wrap(s)); }
+        break;
+      }
+
+      case "blend": {
+        const mode = fx.mode;
+        const op   = fx.opacity ?? 0.5;
+        let fill: string;
+        if (fx.gradient) {
+          const gid = `${fid}-grad`;
+          defs += generateGradientDef(gid, fx.gradient, 0, 0, fullSize, fullSize);
+          fill = `url(#${gid})`;
+        } else {
+          fill = fx.color ?? "#ffffff";
+        }
+        // Mask by target: dots uses mask-dots, eyes uses mask-cornerSquare
+        let maskAttr = "";
+        if (fx.target === "dots")  maskAttr = ` mask="url(#mask-dots)"`;
+        if (fx.target === "eyes")  maskAttr = ` mask="url(#mask-cornerSquare)"`;
+        overlay += `<rect width="${fullSize}" height="${fullSize}" fill="${fill}"${maskAttr} opacity="${op}" style="mix-blend-mode:${mode}"/>`;
+        break;
+      }
+    }
+  }
+
+  return { defs, wrapDots, wrapEyes, wrapAll, overlay };
+}
+
 export async function QRCodeGenerate(
   options: Options,
   _cachedMatrix?: QRMatrix,
+  _frameSecs?: number,
 ): Promise<QRGenerateResult> {
   const config = {
     ...defaultOptions,
@@ -1142,7 +1478,7 @@ export async function QRCodeGenerate(
       }
       return validateQRCanvas(canvas, matrix, effectiveMargin, _ecl, tuning);
     };
-    return { ...base, svg: prefixed, canvas, validate };
+    return { ...base, svg: prefixed, canvas, matrix, validate };
   };
 
   const fullSize = matrixSize + effectiveMargin * 2;
@@ -1282,7 +1618,7 @@ export async function QRCodeGenerate(
 
       // Default to figure/square when no shape is specified
       const shapeType = partConfig.shape?.type ?? "figure";
-      const shapePath = partConfig.shape?.path ?? "square";
+      const shapePath = (partConfig.shape as any)?.path ?? "square";
       const scale = partConfig.scale ?? 1;
 
       // --- Figure rendering (math paths) ---
@@ -1400,7 +1736,7 @@ export async function QRCodeGenerate(
   // the same gradient mask as the QR data dots.
   if (config.wrapper && config.wrapper.fillMargin !== false) {
     const dotsShapeType = config.dotsOptions.shape?.type ?? "figure";
-    const dotsShapePath = (config.dotsOptions.shape?.path ?? "square") as string;
+    const dotsShapePath = ((config.dotsOptions.shape as any)?.path ?? "square") as string;
     const dotsScale = config.dotsOptions.scale ?? 1;
     const noNeighbors: Neighbors = { t: false, r: false, b: false, l: false };
 
@@ -1420,7 +1756,7 @@ export async function QRCodeGenerate(
         // Reject positions fully outside the SVG canvas
         if (px >= fullSize || py >= fullSize || px + 1 <= 0 || py + 1 <= 0) continue;
 
-        if (dotsShapeType === "icon" || dotsShapeType === "custom-icon") {
+        if (dotsShapeType === "icon" || dotsShapeType === "custom-icon" || dotsShapeType === "image-icon") {
           const scaled = dotsScale;
           const offX = (1 - scaled) / 2;
           const offY = (1 - scaled) / 2;
@@ -1623,17 +1959,59 @@ export async function QRCodeGenerate(
     fullSize,
   );
 
+  // Effects (static SVG filters + blend modes)
+  const fxList: QrEffect[] = config.effects
+    ? (Array.isArray(config.effects) ? config.effects : [config.effects])
+    : [];
+  const {
+    defs: fxDefs,
+    wrapDots: fxWrapDots,
+    wrapEyes: fxWrapEyes,
+    wrapAll:  fxWrapAll,
+    overlay:  fxOverlay,
+  } = buildEffects(fxList, fullSize, String(_uid), config.dotsOptions?.color ?? "#000000");
+
+  // Animation (temporal wrappers applied on top of effects)
+  const animList: QrAnimation[] = config.animation
+    ? (Array.isArray(config.animation) ? config.animation : [config.animation])
+    : [];
+  const {
+    defs: animDefs,
+    wrapDots: animWrapDots,
+    wrapEyes: animWrapEyes,
+    wrapContent: animWrapContent,
+    overlay: animOverlay,
+  } = buildAnimations(animList, fullSize, String(_uid), config.dotsOptions?.color ?? "#000000", _frameSecs);
+
+  // Build layers: effects applied first (inner), animations wrap on top (outer)
+  const dotsLayer = animWrapDots(fxWrapDots(generateDotsLayer()));
+  const eyesLayer = animWrapEyes(fxWrapEyes(
+    generateEyeLayer("cornerSquare", "grad-sq", config.cornersSquareOptions) +
+    generateEyeLayer("cornerDot", "grad-dot", config.cornersDotOptions)
+  ));
+  const bgImage = config.backgroundEnable !== false && config.backgroundOptions?.image
+    ? `<image href="${config.backgroundOptions.image}" width="${fullSize}" height="${fullSize}" preserveAspectRatio="none" />`
+    : "";
+  const bgMinContrast = (() => {
+    if (!bgImage) return "";
+    const op = config.backgroundOptions?.minContrast ?? 0;
+    if (op <= 0) return "";
+    return `<rect width="${fullSize}" height="${fullSize}" fill="rgba(0,0,0,${Math.min(1, op).toFixed(3)})" style="pointer-events:none"/>`;
+  })();
+
   // QR content: clipped group + ring layer on top
   const qrContent = `
-    <defs>${defsString}${clipPathDef}</defs>
+    <defs>${defsString}${fxDefs}${animDefs}${clipPathDef}</defs>
     <g ${clipAttr}>
-      <rect width="${fullSize}" height="${fullSize}" fill="${getBackgroundFill()}" ${bgRxAttr}/>
-      ${config.backgroundEnable !== false && config.backgroundOptions?.image ? `<image href="${config.backgroundOptions.image}" width="${fullSize}" height="${fullSize}" preserveAspectRatio="none" />` : ""}
+      ${animWrapContent(fxWrapAll(`<rect width="${fullSize}" height="${fullSize}" fill="${getBackgroundFill()}" ${bgRxAttr}/>
+      ${bgImage}
+      ${bgMinContrast}
       ${decorationsSvg}
-      ${generateDotsLayer()}
-      ${generateEyeLayer("cornerSquare", "grad-sq", config.cornersSquareOptions)}
-      ${generateEyeLayer("cornerDot", "grad-dot", config.cornersDotOptions)}
+      ${dotsLayer}
+      ${eyesLayer}
       ${imagesSvg}
+      ${fxOverlay}
+      ${animOverlay}`))}
     </g>
     ${wrapperRingSvg}`;
 
@@ -2203,6 +2581,7 @@ export async function createQRCode(initialOptions: Options): Promise<QRCodeHandl
   const handle: QRCodeHandle = {
     svg: initial.svg,
     canvas: initial.canvas,
+    matrix: initial.matrix,
     matrixSize: initial.matrixSize,
     eyeZones: initial.eyeZones,
     maxValues: initial.maxValues,
@@ -2214,6 +2593,7 @@ export async function createQRCode(initialOptions: Options): Promise<QRCodeHandl
       const result = await build();
       handle.svg = result.svg;
       handle.canvas = result.canvas;
+      handle.matrix = result.matrix;
       handle.matrixSize = result.matrixSize;
       handle.eyeZones = result.eyeZones;
       handle.maxValues = result.maxValues;
@@ -2224,4 +2604,79 @@ export async function createQRCode(initialOptions: Options): Promise<QRCodeHandl
   };
 
   return handle;
+}
+
+// ---------------------------------------------------------------------------
+// DOM utilities (browser-only)
+// ---------------------------------------------------------------------------
+
+export interface TransitionOptions {
+  /** Cross-fade duration in ms. 0 = instant swap. Default 250. */
+  duration?: number;
+  /** CSS easing function. Default "ease-in-out". */
+  easing?: string;
+}
+
+/**
+ * Render or cross-fade a new QR SVG into a container element.
+ *
+ * Uses CSS Grid overlap so the container grows to the natural SVG size without
+ * requiring explicit width/height. Safe to call rapidly — if called while a
+ * previous transition is still running the outgoing layer is reused as the new
+ * "old" frame, so layers never accumulate.
+ *
+ * @param container  DOM element that receives the QR layers.
+ * @param newSvg     SVG string from `QRCodeGenerate` or `handle.svg`.
+ * @param opts       Optional transition duration/easing.
+ *
+ * @example
+ * // First render
+ * const handle = await createQRCode(options);
+ * crossFadeQR(containerEl, handle.svg);
+ *
+ * // Later update — matrix is reused when data/ecl unchanged, then cross-faded
+ * await handle.update({ dotsOptions: { color: '#e11d48' } });
+ * crossFadeQR(containerEl, handle.svg, { duration: 400 });
+ */
+export function crossFadeQR(
+  container: HTMLElement,
+  newSvg: string,
+  opts: TransitionOptions = {},
+): void {
+  const dur = opts.duration ?? 250;
+  const ease = opts.easing ?? "ease-in-out";
+
+  // Instant path
+  if (dur <= 0) {
+    container.innerHTML = newSvg;
+    return;
+  }
+
+  // Grid stacking: children placed in the same cell overlap naturally.
+  // Only set once — don't clobber an existing display value.
+  if (!container.dataset.qrInit) {
+    container.dataset.qrInit = "1";
+    container.style.display = "grid";
+  }
+
+  const prev = container.lastElementChild as HTMLElement | null;
+
+  const layer = document.createElement("div");
+  layer.style.cssText = `grid-area:1/1/2/2;opacity:0;will-change:opacity`;
+  layer.innerHTML = newSvg;
+  container.appendChild(layer);
+
+  // Force a layout pass so the transition fires from 0→1 rather than jumping.
+  layer.getBoundingClientRect();
+
+  layer.style.transition = `opacity ${dur}ms ${ease}`;
+  layer.style.opacity = "1";
+
+  if (prev) {
+    prev.style.transition = `opacity ${dur}ms ${ease}`;
+    prev.style.opacity = "0";
+    // Remove after transition to keep DOM clean.
+    // `transitionend` is unreliable under rapid calls, so use a timer.
+    setTimeout(() => prev.remove(), dur + 32);
+  }
 }

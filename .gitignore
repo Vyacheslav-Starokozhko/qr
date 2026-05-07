@@ -8,3 +8,6 @@
 /svg-output
 /qr-code-styling-master
 /test*.js
+/**/*.svg
+/*.html
+/**/*.html

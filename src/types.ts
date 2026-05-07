@@ -66,7 +66,7 @@ export type QrImage = {
   name?: string; // Optional name for the image
 };
 
-export type ShapeType = "custom-icon" | "icon" | "figure";
+export type ShapeType = "custom-icon" | "icon" | "figure" | "image-icon";
 
 export type FigureShape =
   | "square"
@@ -103,16 +103,30 @@ export type CornerDotFigure =
   | "classy"
   | "classy-rounded";
 
-export type QrShape = {
-  type?: ShapeType;
-  path?: QRShapesType | FigureShape;
-  viewBox?: string;
-};
+export type QrShape =
+  | { type?: "figure" | "icon"; path?: QRShapesType | FigureShape; viewBox?: string }
+  | { type: "custom-icon"; path: string; viewBox?: string }
+  | {
+      type: "image-icon";
+      /** Base64 data URI (`data:image/gif;base64,...`, `data:image/png;base64,...`) or URL. Animated GIFs are preserved in SVG output. */
+      source: string;
+      /** SVG preserveAspectRatio value (default "xMidYMid slice") */
+      preserveAspectRatio?: string;
+    };
 
 /** Solid color or gradient fill for one overlay layer */
 export type QrLayerFill =
   | { type: "color"; color: string }
-  | { type: "gradient"; gradient: Gradient };
+  | { type: "gradient"; gradient: Gradient }
+  | {
+      type: "image";
+      /** Base64 data URI (`data:image/gif;base64,...`) or URL. Animated GIFs are preserved when embedded in SVG. */
+      source: string;
+      /** Pattern tile width in module units. Defaults to the full QR size (one stretched tile). */
+      width?: number;
+      /** Pattern tile height in module units. Defaults to the full QR size. */
+      height?: number;
+    };
 
 /** Geometric mask that shapes which areas of a layer's fill are visible */
 export type QrOverlayMask =
@@ -205,6 +219,195 @@ export type QrLabel = {
   /** Center Y for "custom" position (frame px). Defaults to below QR + margin. */
   y?: number;
 };
+
+// ---------------------------------------------------------------------------
+// Visual Effects (SVG filters + blend modes)
+// ---------------------------------------------------------------------------
+
+type QrEffectBase = {
+  /**
+   * Parts to apply the effect to.
+   * - `"dots"`  — data modules only
+   * - `"eyes"`  — corner finder patterns only
+   * - `"all"`   — the entire QR content (background + dots + eyes)
+   * Default varies per effect type.
+   */
+  target?: "dots" | "eyes" | "all";
+};
+
+/** SVG `feDropShadow` — adds a depth shadow behind the target elements */
+export type QrEffectDropShadow = QrEffectBase & {
+  type: "drop-shadow";
+  /** Horizontal shadow offset in module units (default 1.5) */
+  dx?: number;
+  /** Vertical shadow offset in module units (default 1.5) */
+  dy?: number;
+  /** Shadow blur radius in module units (default 1.5) */
+  blur?: number;
+  /** Shadow color (default "#000000") */
+  color?: string;
+  /** Shadow opacity 0–1 (default 0.45) */
+  opacity?: number;
+};
+
+/**
+ * Layered neon glow using two `feGaussianBlur` passes — a tight bright inner
+ * halo and a wide dim outer halo — both tinted to the glow color.
+ */
+export type QrEffectNeonGlow = QrEffectBase & {
+  type: "neon-glow";
+  /** Glow tint color (default: inherits dot color) */
+  color?: string;
+  /** Inner halo blur radius in module units (default 2) */
+  intensity?: number;
+  /** Outer halo blur radius (default: intensity × 2.5) */
+  spread?: number;
+};
+
+/**
+ * `feMorphology` — expand (dilate) or shrink (erode) the rendered modules.
+ * Dilate makes dots fatter; nearby dots that are close enough merge smoothly.
+ */
+export type QrEffectMorphology = QrEffectBase & {
+  type: "morphology";
+  /** `"dilate"` expands, `"erode"` shrinks (default `"dilate"`) */
+  operator?: "dilate" | "erode";
+  /** Expansion/contraction in module units (default 0.3) */
+  radius?: number;
+};
+
+/**
+ * Metaball / "liquid mercury" effect — `feGaussianBlur` + `feColorMatrix`
+ * alpha-threshold. Nearby dots blur together into smooth organic blobs.
+ * Applied to `"dots"` by default (keeps eyes sharp).
+ */
+export type QrEffectLiquid = QrEffectBase & {
+  type: "liquid";
+  /** Blob-merge radius in module units — higher = more aggressive merging (default 1.2) */
+  blur?: number;
+  /**
+   * Alpha threshold 0–1 — lower value = more merging (more blobs connect).
+   * Default 0.35.
+   */
+  threshold?: number;
+};
+
+/**
+ * CSS `mix-blend-mode` overlay — a colored or gradient rectangle placed on
+ * top of the QR with a CSS blend mode. Produces richer, more saturated colors
+ * than plain opacity without touching dot geometry.
+ *
+ * @example Screen overlay — colorises dark dots, leaves white background clean
+ * ```ts
+ * { type: "blend", mode: "screen", color: "#ff6600", opacity: 0.6 }
+ * ```
+ * @example Multiply gradient — adds depth across the full QR surface
+ * ```ts
+ * { type: "blend", mode: "multiply",
+ *   gradient: { type: "linear", rotation: 135,
+ *     colorStops: [{ offset: "0%", color: "#ff0080" }, { offset: "100%", color: "#0080ff" }] } }
+ * ```
+ */
+export type QrEffectBlend = QrEffectBase & {
+  type: "blend";
+  /** CSS mix-blend-mode value */
+  mode:
+    | "screen" | "multiply" | "overlay"
+    | "darken" | "lighten"
+    | "hard-light" | "soft-light"
+    | "color-dodge" | "color-burn"
+    | "difference" | "exclusion";
+  /** Solid overlay color (default `"#ffffff"`). Overridden by `gradient`. */
+  color?: string;
+  /** Gradient overlay — takes priority over `color` */
+  gradient?: Gradient;
+  /** Overlay opacity 0–1 (default 0.5) */
+  opacity?: number;
+};
+
+export type QrEffect =
+  | QrEffectDropShadow
+  | QrEffectNeonGlow
+  | QrEffectMorphology
+  | QrEffectLiquid
+  | QrEffectBlend;
+
+// ---------------------------------------------------------------------------
+// Animation
+// ---------------------------------------------------------------------------
+
+type QrAnimBase = {
+  /** Animation duration in seconds. Defaults: pulse 2 · shimmer 2.5 · draw 1.5 · glow 2 */
+  duration?: number;
+  /** Delay before start, seconds (default 0) */
+  delay?: number;
+  /**
+   * Repeat behaviour.
+   * - `true`  (default for pulse / shimmer / glow) — loop indefinitely
+   * - `false` (default for draw) — play once and freeze
+   * - number — play exactly N times
+   */
+  repeat?: boolean | number;
+};
+
+/** Opacity pulsation on eyes, dots, or the entire QR content */
+export type QrAnimationPulse = QrAnimBase & {
+  type: "pulse";
+  /** What to animate (default "eyes") */
+  target?: "eyes" | "dots" | "all";
+  /** Minimum opacity 0–1 (default 0.4) */
+  from?: number;
+  /** Maximum opacity 0–1 (default 1.0) */
+  to?: number;
+};
+
+/** Moving highlight sweep across the QR surface */
+export type QrAnimationShimmer = QrAnimBase & {
+  type: "shimmer";
+  /** Highlight color (default "#ffffff") */
+  color?: string;
+  /** Highlight opacity 0–1 (default 0.35) */
+  opacity?: number;
+  /** Sweep direction (default "ltr") */
+  direction?: "ltr" | "ttb";
+};
+
+/** Wipe-reveal effect — QR "draws itself" into view */
+export type QrAnimationDraw = QrAnimBase & {
+  type: "draw";
+  /** Reveal direction (default "ltr") */
+  direction?: "ltr" | "ttb" | "rtl" | "btt";
+};
+
+/** Pulsing glow halo around the QR modules */
+export type QrAnimationGlow = QrAnimBase & {
+  type: "glow";
+  /** Glow tint color (default: inherits dot color, falls back to "#4488ff") */
+  color?: string;
+  /** Peak blur radius in module units (default 3) */
+  intensity?: number;
+};
+
+export type QrAnimation =
+  | QrAnimationPulse
+  | QrAnimationShimmer
+  | QrAnimationDraw
+  | QrAnimationGlow;
+
+export interface GifExportOptions {
+  /** Output width in pixels (default: SVG intrinsic width) */
+  width?: number;
+  /** Output height in pixels (default: SVG intrinsic height) */
+  height?: number;
+  /** Frames per second (default: 20) */
+  fps?: number;
+  /** Number of full animation cycles to include (default: 1) */
+  cycles?: number;
+  /** Background color as hex string or "transparent" (default: "transparent") */
+  background?: string;
+  /** 0 = loop forever, N = loop N times (default: 0) */
+  repeat?: number;
+}
 
 // Frame: decorative image that wraps the QR code
 export type QrFrame = {
@@ -468,7 +671,14 @@ export type Options = {
   backgroundOptions?: {
     color?: string;
     gradient?: Gradient;
-    image?: string; // URL for background image
+    /** URL or base64 data URI for a background image. Animated GIFs work in SVG. */
+    image?: string;
+    /**
+     * Semi-transparent dark overlay applied on top of `image` (0–1).
+     * Use this to ensure QR dots stay scannable over bright or high-contrast GIF frames.
+     * 0 = no overlay (default), 0.5 = 50 % darkening.
+     */
+    minContrast?: number;
   };
 
   images?: QrImage[]; // Logos (Array)
@@ -491,6 +701,18 @@ export type Options = {
   dotsOptions?: QrPartOptions; // The main data
   cornersDotOptions?: QrPartOptions; // Inner Eye (Ball)
   cornersSquareOptions?: QrPartOptions; // Outer Eye (Frame)
+
+  /**
+   * SVG filter effects (drop shadow, neon glow, morphology, liquid metaball,
+   * blend-mode overlay). Pass a single effect or an array to stack.
+   */
+  effects?: QrEffect | QrEffect[];
+
+  /**
+   * SVG animations applied to the generated code.
+   * Pass a single animation or an array to stack multiple effects.
+   */
+  animation?: QrAnimation | QrAnimation[];
 };
 
 export enum EShapeType {
