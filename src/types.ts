@@ -394,20 +394,8 @@ export type QrAnimation =
   | QrAnimationDraw
   | QrAnimationGlow;
 
-export interface GifExportOptions {
-  /** Output width in pixels (default: SVG intrinsic width) */
-  width?: number;
-  /** Output height in pixels (default: SVG intrinsic height) */
-  height?: number;
-  /** Frames per second (default: 20) */
-  fps?: number;
-  /** Number of full animation cycles to include (default: 1) */
-  cycles?: number;
-  /** Background color as hex string or "transparent" (default: "transparent") */
-  background?: string;
-  /** 0 = loop forever, N = loop N times (default: 0) */
-  repeat?: number;
-}
+/** @deprecated Use `ExportOptions` from the main export — all fields are now unified. */
+export type GifExportOptions = import("./export").ExportOptions;
 
 // Frame: decorative image that wraps the QR code
 export type QrFrame = {
