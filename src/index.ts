@@ -22,10 +22,115 @@ import {
   QrEffect,
 } from "./types";
 import { detectFrameInset } from "./frame-inset";
-import { exportQR, exportGIF, FileExtension, ExportOptions } from "./export";
+import {
+  FileExtension, ExportOptions,
+  parseBg, svgDims, svgToRgba, encodeGifFrames, sharpRaster,
+} from "./export";
 import { defaultOptions } from "./default";
 
-export { exportQR, exportGIF, QRShapes, FileExtension, ExportOptions };
+export { QRShapes, FileExtension, ExportOptions };
+
+/**
+ * Export a QR code to any format.
+ *
+ * - **svg / png / jpeg / webp**: pass a pre-rendered SVG string as `input`.
+ *   png/jpeg/webp require `sharp` (Node.js). svg works everywhere.
+ * - **gif**: pass either an SVG string (→ static single-frame GIF) or the
+ *   original `Options` object (→ animated GIF with all animation keyframes
+ *   baked in). Works in **browser and Node.js** — no backend required.
+ *
+ * @example
+ * const { svg } = await QRCodeGenerate({ data: 'https://example.com' });
+ * const png = await exportQR(svg, 'png', { width: 1000 });
+ *
+ * const gif = await exportQR(
+ *   { data: 'https://example.com', animation: { type: 'pulse' } },
+ *   'gif',
+ *   { fps: 20, cycles: 2, background: '#ffffff' },
+ * );
+ */
+export async function exportQR(
+  input: string | Options,
+  format: FileExtension,
+  options: ExportOptions = {},
+): Promise<Buffer | Uint8Array> {
+  // SVG passthrough
+  if (format === "svg") {
+    const svg = typeof input === "string" ? input : "";
+    return typeof Buffer !== "undefined"
+      ? Buffer.from(svg, "utf-8")
+      : new TextEncoder().encode(svg);
+  }
+
+  // Raster (Node.js / sharp)
+  if (format === "png" || format === "jpeg" || format === "webp") {
+    if (typeof input !== "string")
+      throw new Error("[exportQR] Pass a pre-rendered SVG string for png/jpeg/webp.");
+    return sharpRaster(input, format, options);
+  }
+
+  // GIF (browser + Node.js)
+  if (format === "gif") {
+    return _gifExport(input, options);
+  }
+
+  throw new Error(`[exportQR] Unknown format: "${format}". Use: svg | png | jpeg | webp | gif`);
+}
+
+/** @deprecated Use `exportQR(qrOptions, 'gif', options)` instead. */
+export async function exportGIF(
+  qrOptions: Options,
+  gifOptions: ExportOptions = {},
+): Promise<Buffer | Uint8Array> {
+  return _gifExport(qrOptions, gifOptions);
+}
+
+async function _gifExport(
+  input: string | Options,
+  opts: ExportOptions,
+): Promise<Buffer | Uint8Array> {
+  const fps    = Math.max(1, Math.min(50, opts.fps    ?? 20));
+  const cycles = Math.max(1,              opts.cycles  ?? 1);
+  const repeat =                          opts.repeat  ?? 0;
+  const bg     = parseBg(opts.background);
+  const isSvgString = typeof input === "string";
+
+  let cycleDur = 0;
+  if (!isSvgString) {
+    const qrOpts = input as Options;
+    const animList = qrOpts.animation
+      ? (Array.isArray(qrOpts.animation) ? qrOpts.animation : [qrOpts.animation])
+      : [];
+    cycleDur = getAnimationDuration(animList);
+  }
+
+  const totalFrames = cycleDur > 0 ? Math.round(cycleDur * cycles * fps) : 1;
+  const frameDelay  = Math.round(1000 / fps);
+
+  // First SVG — used for dimension detection and frame 0
+  const firstSvg = isSvgString
+    ? (input as string)
+    : (await QRCodeGenerate(input as Options, undefined, 0)).svg;
+
+  const cachedMatrix = isSvgString
+    ? undefined
+    : (await QRCodeGenerate(input as Options, undefined, 0)).matrix;
+
+  const intrinsic = svgDims(firstSvg);
+  const outW = opts.width  ?? intrinsic.width;
+  const outH = opts.height ?? intrinsic.height;
+
+  // Render all frames to RGBA
+  const frames: Uint8ClampedArray[] = [];
+  for (let f = 0; f < totalFrames; f++) {
+    const svg = (f === 0 || isSvgString)
+      ? firstSvg
+      : (await QRCodeGenerate(input as Options, cachedMatrix, (f / fps) % cycleDur)).svg;
+    frames.push(await svgToRgba(svg, outW, outH, bg));
+  }
+
+  return encodeGifFrames(frames, outW, outH, frameDelay, repeat);
+}
 
 export * from "./types";
 export { randomizeOptions, invertOptions, normalizeOptions } from "./randomize";
