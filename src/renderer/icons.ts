@@ -32,10 +32,6 @@ export const shapes = {
     viewBox: "0 0 24 24",
     d: "M0 0H24V24H0V0Z",
   },
-  "inner-eye-star": {
-    viewBox: "0 0 24 24",
-    d: "M12 0 L14.695 8.291 L23.413 8.292 L16.363 13.417 L19.054 21.708 L12 16.584 L4.946 21.708 L7.637 13.417 L0.587 8.292 L9.305 8.291 Z",
-  },
   "outer-eye-classy": {
     viewBox: "0 0 24 24",
     d: "M24 0V22C24 23.1046 23.1046 24 22 24H0V2C0 0.895431 0.895431 0 2 0H24ZM3.5 3.5V20.5H20.5V3.5H3.5Z",
@@ -125,7 +121,6 @@ export const QRShapes = {
   INNER_EYE_EXTRA_ROUNDED: "inner-eye-extra-rounded",
   INNER_EYE_ROUNDED: "inner-eye-rounded",
   INNER_EYE_SQUARE: "inner-eye-square",
-  INNER_EYE_STAR: "inner-eye-star",
 
   // Outer Eye
   OUTER_EYE_CLASSY: "outer-eye-classy",

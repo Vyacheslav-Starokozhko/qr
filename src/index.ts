@@ -93,11 +93,12 @@ function _luminance(hex: string): number {
   return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
 }
 
-/** Pick the representative dot color (flat or first gradient stop). */
+/** Pick the representative dot color from the first overlay base layer. */
 function _dotColor(opts: Options): string {
-  const d = opts.dotsOptions;
-  if (d?.gradient?.colorStops?.length) return d.gradient.colorStops[0].color ?? "#000000";
-  return d?.color ?? "#000000";
+  const base = opts.dotsOptions?.overlays?.find(o => !o.mask);
+  if (base?.fill.type === "color") return base.fill.color;
+  if (base?.fill.type === "gradient") return base.fill.gradient.colorStops[0]?.color ?? "#000000";
+  return "#000000";
 }
 
 /**
@@ -1855,7 +1856,6 @@ export async function QRCodeGenerate(
 
   const eyes = getEyePositions(matrixSize, effectiveMargin);
   const eyeFrameSize = 7; // Outer frame
-  const eyeDotSize = 3; // Inner center (ball)
 
   // --- 1. SETUP DEFS ---
   let defsString = "";
@@ -1872,55 +1872,28 @@ export async function QRCodeGenerate(
     );
   }
 
-  // B. Dots fill — overlays take priority over gradient/color
+  // B. Dots fill — overlays
   const dotsOverlayRefs: string[] = [];
-  if (config.dotsOptions.overlays?.length) {
-    for (let i = 0; i < config.dotsOptions.overlays.length; i++) {
-      const { defs, fillRef } = generateOverlayLayerDef(`dots-${i}`, config.dotsOptions.overlays[i], fullSize);
-      defsString += defs;
-      dotsOverlayRefs.push(fillRef);
-    }
-  } else if (config.dotsOptions.gradient) {
-    defsString += generateGradientDef("grad-dots", config.dotsOptions.gradient, 0, 0, fullSize, fullSize);
+  for (const [i, ov] of (config.dotsOptions.overlays ?? []).entries()) {
+    const { defs, fillRef } = generateOverlayLayerDef(`dots-${i}`, ov, fullSize);
+    defsString += defs;
+    dotsOverlayRefs.push(fillRef);
   }
 
-  // C. Eye fills — overlays (shared across all eyes) or per-eye gradients
+  // C. Eye fills — overlays
   const squareOverlayRefs: string[] = [];
   const dotOverlayRefs: string[] = [];
 
-  if (config.cornersSquareOptions.overlays?.length) {
-    for (let i = 0; i < config.cornersSquareOptions.overlays.length; i++) {
-      const { defs, fillRef } = generateOverlayLayerDef(`sq-${i}`, config.cornersSquareOptions.overlays[i], fullSize);
-      defsString += defs;
-      squareOverlayRefs.push(fillRef);
-    }
+  for (const [i, ov] of (config.cornersSquareOptions.overlays ?? []).entries()) {
+    const { defs, fillRef } = generateOverlayLayerDef(`sq-${i}`, ov, fullSize);
+    defsString += defs;
+    squareOverlayRefs.push(fillRef);
   }
-  if (config.cornersDotOptions.overlays?.length) {
-    for (let i = 0; i < config.cornersDotOptions.overlays.length; i++) {
-      const { defs, fillRef } = generateOverlayLayerDef(`dot-${i}`, config.cornersDotOptions.overlays[i], fullSize);
-      defsString += defs;
-      dotOverlayRefs.push(fillRef);
-    }
+  for (const [i, ov] of (config.cornersDotOptions.overlays ?? []).entries()) {
+    const { defs, fillRef } = generateOverlayLayerDef(`dot-${i}`, ov, fullSize);
+    defsString += defs;
+    dotOverlayRefs.push(fillRef);
   }
-
-  eyes.forEach((eye) => {
-    // Per-eye gradients (only when overlays are NOT used)
-    if (!squareOverlayRefs.length && config.cornersSquareOptions.gradient) {
-      defsString += generateGradientDef(
-        `grad-sq-${eye.id}`,
-        config.cornersSquareOptions.gradient,
-        eye.x, eye.y, eyeFrameSize, eyeFrameSize,
-      );
-    }
-    // The +2 offset keeps the gradient tight around the ball area
-    if (!dotOverlayRefs.length && config.cornersDotOptions.gradient) {
-      defsString += generateGradientDef(
-        `grad-dot-${eye.id}`,
-        config.cornersDotOptions.gradient,
-        eye.x + 2, eye.y + 2, eyeDotSize, eyeDotSize,
-      );
-    }
-  });
 
   defsString += createSymbol("icon-dots", config.dotsOptions);
   defsString += createSymbol("icon-sq", config.cornersSquareOptions);
@@ -2163,14 +2136,12 @@ export async function QRCodeGenerate(
       return `${maskDef}${rects}`;
     }
 
-    const fill = config.dotsOptions.gradient ? "url(#grad-dots)" : config.dotsOptions.color;
-    return `${maskDef}<rect width="${fullSize}" height="${fullSize}" fill="${fill}" mask="url(#mask-dots)"/>`;
+    return `${maskDef}<rect width="${fullSize}" height="${fullSize}" fill="#000000" mask="url(#mask-dots)"/>`;
   };
 
-  // Eyes Layer (Independent Gradients) — combines icon <use> elements and figure <path> data
+  // Eyes Layer — combines icon <use> elements and figure <path> data
   const generateEyeLayer = (
     key: "cornerSquare" | "cornerDot",
-    gradPrefix: string,
     partConfig: QrPartOptions,
   ) => {
     const hasUses = !!uses[key];
@@ -2193,7 +2164,6 @@ export async function QRCodeGenerate(
     let rects = "";
 
     if (overlayRefs.length) {
-      // Render each overlay layer for every eye
       overlayRefs.forEach((ref, i) => {
         const op = partConfig.overlays![i].opacity;
         const opAttr = op !== undefined ? ` opacity="${op}"` : "";
@@ -2203,9 +2173,7 @@ export async function QRCodeGenerate(
       });
     } else {
       eyes.forEach((eye) => {
-        let fill = partConfig.color;
-        if (partConfig.gradient) fill = `url(#${gradPrefix}-${eye.id})`;
-        rects += `<rect x="${eye.x}" y="${eye.y}" width="${eyeFrameSize}" height="${eyeFrameSize}" fill="${fill}" mask="url(#${maskId})" />`;
+        rects += `<rect x="${eye.x}" y="${eye.y}" width="${eyeFrameSize}" height="${eyeFrameSize}" fill="#000000" mask="url(#${maskId})" />`;
       });
     }
     return `<defs>${maskDef}</defs>${rects}`;
@@ -2335,7 +2303,7 @@ export async function QRCodeGenerate(
     wrapEyes: fxWrapEyes,
     wrapAll:  fxWrapAll,
     overlay:  fxOverlay,
-  } = buildEffects(fxList, fullSize, String(_uid), config.dotsOptions?.color ?? "#000000");
+  } = buildEffects(fxList, fullSize, String(_uid), _dotColor(config));
 
   // Animation (temporal wrappers applied on top of effects)
   const animList: QrAnimation[] = config.animation ?? [];
@@ -2345,13 +2313,13 @@ export async function QRCodeGenerate(
     wrapEyes: animWrapEyes,
     wrapContent: animWrapContent,
     overlay: animOverlay,
-  } = buildAnimations(animList, fullSize, String(_uid), config.dotsOptions?.color ?? "#000000", _frameSecs);
+  } = buildAnimations(animList, fullSize, String(_uid), _dotColor(config), _frameSecs);
 
   // Build layers: effects applied first (inner), animations wrap on top (outer)
   const dotsLayer = animWrapDots(fxWrapDots(generateDotsLayer()));
   const eyesLayer = animWrapEyes(fxWrapEyes(
-    generateEyeLayer("cornerSquare", "grad-sq", config.cornersSquareOptions) +
-    generateEyeLayer("cornerDot", "grad-dot", config.cornersDotOptions)
+    generateEyeLayer("cornerSquare", config.cornersSquareOptions) +
+    generateEyeLayer("cornerDot", config.cornersDotOptions)
   ));
   const bgImage = config.backgroundEnable !== false && config.backgroundOptions?.image
     ? `<image href="${config.backgroundOptions.image}" width="${fullSize}" height="${fullSize}" preserveAspectRatio="none" />`

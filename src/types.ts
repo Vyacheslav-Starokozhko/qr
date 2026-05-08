@@ -163,11 +163,8 @@ export type QrOverlay = {
 
 export type QrPartOptions = {
   shape?: QrShape;
-  color?: string;
-  gradient?: Gradient;
   /**
-   * Stacked fill layers, each with its own color/gradient and optional geometric mask.
-   * Takes priority over `gradient` and `color` when set.
+   * Stacked fill layers — color/gradient and optional geometric mask per layer.
    * Index 0 = bottom layer, last = top.
    */
   overlays?: QrOverlay[];

@@ -397,9 +397,9 @@ function buildQROptions(
 
   return {
     backgroundOptions:    { color: cutoutColor },
-    dotsOptions:          { color: primary },
-    cornersSquareOptions: { color: secondary },
-    cornersDotOptions:    { color: primary },
+    dotsOptions:          { overlays: [{ fill: { type: "color", color: primary } }] },
+    cornersSquareOptions: { overlays: [{ fill: { type: "color", color: secondary } }] },
+    cornersDotOptions:    { overlays: [{ fill: { type: "color", color: primary } }] },
   };
 }
 

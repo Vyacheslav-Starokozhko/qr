@@ -209,96 +209,151 @@ function hslToHex(h: number, s: number, l: number): string {
 // ── Shape pools (default values referenced by resolveT) ──────────────────────
 
 const DOT_ICON_SHAPES = [
-  "dots-square", "dots-rounded", "dots-classy", "dots-classy-rounded", "dots-extra-rounded",
+  "dots-square",
+  "dots-rounded",
+  "dots-classy",
+  "dots-classy-rounded",
+  "dots-extra-rounded",
 ] as const;
 
 const DOT_FIGURE_SHAPES = [
-  "square", "dots", "extra-rounded", "rounded", "classy", "classy-rounded",
+  "square",
+  "dots",
+  "extra-rounded",
+  "rounded",
+  "classy",
+  "classy-rounded",
 ] as const;
 
 const INNER_EYE_SHAPES = [
-  "inner-eye-square", "inner-eye-dot", "inner-eye-dots", "inner-eye-rounded",
-  "inner-eye-classy", "inner-eye-extra-rounded", "inner-eye-extra-classy", "inner-eye-star",
+  "inner-eye-square",
+  "inner-eye-dot",
+  "inner-eye-dots",
+  "inner-eye-rounded",
+  "inner-eye-classy",
+  "inner-eye-extra-rounded",
+  "inner-eye-extra-classy",
 ] as const;
 
 const OUTER_EYE_SHAPES = [
-  "outer-eye-square", "outer-eye-dot", "outer-eye-dots", "outer-eye-rounded",
-  "outer-eye-classy", "outer-eye-extra-rounded", "outer-eye-extra-classy",
-  "outer-eye-heart", "outer-eye-star",
+  "outer-eye-square",
+  "outer-eye-dot",
+  "outer-eye-dots",
+  "outer-eye-rounded",
+  "outer-eye-classy",
+  "outer-eye-extra-rounded",
+  "outer-eye-extra-classy",
+  "outer-eye-heart",
+  "outer-eye-star",
 ] as const;
 
 // ── Tuning resolver ───────────────────────────────────────────────────────────
 
 type RT = {
-  darkThemeChance: number; gradientChance: number; threeStopChance: number;
-  darkL: [number,number]; darkS: [number,number];
-  vividL: [number,number]; vividS: [number,number];
-  lightBgL: [number,number]; lightBgS: [number,number];
-  darkBgL: [number,number]; darkBgS: [number,number];
-  shimmerL: [number,number]; shimmerS: [number,number];
-  scaleRange: [number,number]; layerRange: [number,number];
-  opDark: [number,number]; opLight: [number,number];
-  maskTypes: QrOverlayMask["type"][]; stripeAngles: number[];
-  dotFigures: string[]; dotIcons: string[]; dotIconChance: number;
-  innerEye: string[]; outerEye: string[];
+  darkThemeChance: number;
+  gradientChance: number;
+  threeStopChance: number;
+  darkL: [number, number];
+  darkS: [number, number];
+  vividL: [number, number];
+  vividS: [number, number];
+  lightBgL: [number, number];
+  lightBgS: [number, number];
+  darkBgL: [number, number];
+  darkBgS: [number, number];
+  shimmerL: [number, number];
+  shimmerS: [number, number];
+  scaleRange: [number, number];
+  layerRange: [number, number];
+  opDark: [number, number];
+  opLight: [number, number];
+  maskTypes: QrOverlayMask["type"][];
+  stripeAngles: number[];
+  dotFigures: string[];
+  dotIcons: string[];
+  dotIconChance: number;
+  innerEye: string[];
+  outerEye: string[];
   // effects
-  fxDropShadow: number; fxNeonGlow: number; fxMorphology: number;
-  fxLiquid: number; fxBlend: number; fxMax: number;
-  fxNoise: number; fxDuotone: number; fxEmboss: number; fxColorSplit: number;
+  fxDropShadow: number;
+  fxNeonGlow: number;
+  fxMorphology: number;
+  fxLiquid: number;
+  fxBlend: number;
+  fxMax: number;
+  fxNoise: number;
+  fxDuotone: number;
+  fxEmboss: number;
+  fxColorSplit: number;
   // animations
-  anPulse: number; anShimmer: number; anDraw: number; anGlow: number;
-  anMax: number; anDurRange: [number,number];
-  anColorCycle: number; anRipple: number; anSpotlight: number; anFloat: number;
+  anPulse: number;
+  anShimmer: number;
+  anDraw: number;
+  anGlow: number;
+  anMax: number;
+  anDurRange: [number, number];
+  anColorCycle: number;
+  anRipple: number;
+  anSpotlight: number;
+  anFloat: number;
 };
 
 function resolveT(t?: RandomizeTuning): RT {
-  const c = t?.colors; const o = t?.overlays; const s = t?.shapes;
-  const e = t?.effects; const a = t?.animations;
+  const c = t?.colors;
+  const o = t?.overlays;
+  const s = t?.shapes;
+  const e = t?.effects;
+  const a = t?.animations;
   return {
-    darkThemeChance:  t?.darkThemeChance    ?? 0.45,
-    gradientChance:   t?.gradientChance     ?? 0.60,
-    threeStopChance:  t?.threeStopChance    ?? 0.45,
-    darkL:    c?.darkLightness     ?? [10, 32],
-    darkS:    c?.darkSaturation    ?? [85, 100],
-    vividL:   c?.vividLightness    ?? [62, 88],
-    vividS:   c?.vividSaturation   ?? [80, 100],
-    lightBgL: c?.lightBgLightness  ?? [92, 98],
+    darkThemeChance: t?.darkThemeChance ?? 0.45,
+    gradientChance: t?.gradientChance ?? 0.6,
+    threeStopChance: t?.threeStopChance ?? 0.45,
+    darkL: c?.darkLightness ?? [10, 32],
+    darkS: c?.darkSaturation ?? [85, 100],
+    vividL: c?.vividLightness ?? [62, 88],
+    vividS: c?.vividSaturation ?? [80, 100],
+    lightBgL: c?.lightBgLightness ?? [92, 98],
     lightBgS: c?.lightBgSaturation ?? [10, 45],
-    darkBgL:  c?.darkBgLightness   ?? [4, 14],
-    darkBgS:  c?.darkBgSaturation  ?? [40, 85],
-    shimmerL: c?.shimmerLightness  ?? [88, 98],
+    darkBgL: c?.darkBgLightness ?? [4, 14],
+    darkBgS: c?.darkBgSaturation ?? [40, 85],
+    shimmerL: c?.shimmerLightness ?? [88, 98],
     shimmerS: c?.shimmerSaturation ?? [0, 20],
-    scaleRange:  o?.scaleRange      ?? [0.7, 2.5],
-    layerRange:  o?.layerCountRange ?? [1, 2],
-    opDark:   o?.opacityDark       ?? [0.12, 0.40],
-    opLight:  o?.opacityLight      ?? [0.35, 0.85],
-    maskTypes:    (o?.maskTypes    ?? ["stripe", "zigzag", "wave", "checker"]) as QrOverlayMask["type"][],
-    stripeAngles:  o?.stripeAngles ?? [0, 30, 45, 60, 90, 120, 135, 150],
-    dotFigures: s?.dotFigures  ?? [...DOT_FIGURE_SHAPES],
-    dotIcons:   s?.dotIcons    ?? [...DOT_ICON_SHAPES],
+    scaleRange: o?.scaleRange ?? [0.7, 2.5],
+    layerRange: o?.layerCountRange ?? [1, 2],
+    opDark: o?.opacityDark ?? [0.12, 0.4],
+    opLight: o?.opacityLight ?? [0.35, 0.85],
+    maskTypes: (o?.maskTypes ?? [
+      "stripe",
+      "zigzag",
+      "wave",
+      "checker",
+    ]) as QrOverlayMask["type"][],
+    stripeAngles: o?.stripeAngles ?? [0, 30, 45, 60, 90, 120, 135, 150],
+    dotFigures: s?.dotFigures ?? [...DOT_FIGURE_SHAPES],
+    dotIcons: s?.dotIcons ?? [...DOT_ICON_SHAPES],
     dotIconChance: s?.dotIconChance ?? 0.5,
     innerEye: s?.innerEye ?? [...INNER_EYE_SHAPES],
     outerEye: s?.outerEye ?? [...OUTER_EYE_SHAPES],
-    fxDropShadow: e?.dropShadowChance  ?? 0.25,
-    fxNeonGlow:   e?.neonGlowChance    ?? 0.20,
-    fxMorphology: e?.morphologyChance  ?? 0.20,
-    fxLiquid:     e?.liquidChance      ?? 0.15,
-    fxBlend:      e?.blendChance       ?? 0.20,
-    fxMax:        e?.maxEffects        ?? 3,
-    fxNoise:      e?.noiseChance       ?? 0.25,
-    fxDuotone:    e?.duotoneChance     ?? 0.15,
-    fxEmboss:     e?.embossChance      ?? 0.20,
-    fxColorSplit: e?.colorSplitChance  ?? 0.18,
-    anPulse:      a?.pulseChance       ?? 0.30,
-    anShimmer:    a?.shimmerChance     ?? 0.30,
-    anDraw:       a?.drawChance        ?? 0.20,
-    anGlow:       a?.glowChance        ?? 0.20,
-    anMax:        a?.maxAnimations     ?? 3,
-    anDurRange:   a?.durationRange     ?? [1.5, 4],
-    anColorCycle: a?.colorCycleChance  ?? 0.25,
-    anRipple:     a?.rippleChance      ?? 0.30,
-    anSpotlight:  a?.spotlightChance   ?? 0.25,
-    anFloat:      a?.floatChance       ?? 0.20,
+    fxDropShadow: e?.dropShadowChance ?? 0.25,
+    fxNeonGlow: e?.neonGlowChance ?? 0.2,
+    fxMorphology: e?.morphologyChance ?? 0.2,
+    fxLiquid: e?.liquidChance ?? 0.15,
+    fxBlend: e?.blendChance ?? 0.2,
+    fxMax: e?.maxEffects ?? 3,
+    fxNoise: e?.noiseChance ?? 0.25,
+    fxDuotone: e?.duotoneChance ?? 0.15,
+    fxEmboss: e?.embossChance ?? 0.2,
+    fxColorSplit: e?.colorSplitChance ?? 0.18,
+    anPulse: a?.pulseChance ?? 0.3,
+    anShimmer: a?.shimmerChance ?? 0.3,
+    anDraw: a?.drawChance ?? 0.2,
+    anGlow: a?.glowChance ?? 0.2,
+    anMax: a?.maxAnimations ?? 3,
+    anDurRange: a?.durationRange ?? [1.5, 4],
+    anColorCycle: a?.colorCycleChance ?? 0.25,
+    anRipple: a?.rippleChance ?? 0.3,
+    anSpotlight: a?.spotlightChance ?? 0.25,
+    anFloat: a?.floatChance ?? 0.2,
   };
 }
 
@@ -316,24 +371,28 @@ function makeGen(tc: RT) {
     (rng: () => number) =>
       hslToHex(Math.floor(rng() * 360), ri(sLo, sHi, rng), ri(lLo, lHi, rng));
 
-  const darkC   = mkC(tc.darkL,    tc.darkS);
-  const vividC  = mkC(tc.vividL,   tc.vividS);
+  const darkC = mkC(tc.darkL, tc.darkS);
+  const vividC = mkC(tc.vividL, tc.vividS);
   const pastelC = mkC(tc.lightBgL, tc.lightBgS);
-  const deepC   = mkC(tc.darkBgL,  tc.darkBgS);
-  const shimC   = mkC(tc.shimmerL, tc.shimmerS);
+  const deepC = mkC(tc.darkBgL, tc.darkBgS);
+  const shimC = mkC(tc.shimmerL, tc.shimmerS);
 
-  function grad(colorFn: (rng: () => number) => string, rng: () => number): Gradient {
+  function grad(
+    colorFn: (rng: () => number) => string,
+    rng: () => number,
+  ): Gradient {
     const isLinear = rng() < 0.55;
-    const stops = rng() < tc.threeStopChance
-      ? [
-          { offset: "0%",   color: colorFn(rng) },
-          { offset: "50%",  color: colorFn(rng) },
-          { offset: "100%", color: colorFn(rng) },
-        ]
-      : [
-          { offset: "0%",   color: colorFn(rng) },
-          { offset: "100%", color: colorFn(rng) },
-        ];
+    const stops =
+      rng() < tc.threeStopChance
+        ? [
+            { offset: "0%", color: colorFn(rng) },
+            { offset: "50%", color: colorFn(rng) },
+            { offset: "100%", color: colorFn(rng) },
+          ]
+        : [
+            { offset: "0%", color: colorFn(rng) },
+            { offset: "100%", color: colorFn(rng) },
+          ];
     return {
       type: isLinear ? "linear" : "radial",
       ...(isLinear ? { rotation: pick(GRAD_ROTATIONS, rng) } : {}),
@@ -341,20 +400,20 @@ function makeGen(tc: RT) {
     };
   }
 
-  function layerFill(colorFn: (rng: () => number) => string, rng: () => number): QrLayerFill {
-    if (rng() < tc.gradientChance) return { type: "gradient", gradient: grad(colorFn, rng) };
+  function layerFill(
+    colorFn: (rng: () => number) => string,
+    rng: () => number,
+  ): QrLayerFill {
+    if (rng() < tc.gradientChance)
+      return { type: "gradient", gradient: grad(colorFn, rng) };
     return { type: "color", color: colorFn(rng) };
   }
 
-  // Solid-or-gradient fill for a QR part (dots / eyes)
-  function partFill(isDark: boolean, rng: () => number): Pick<QrPartOptions, "color" | "gradient"> {
-    const colorFn = isDark ? vividC : darkC;
-    if (rng() < tc.gradientChance) return { gradient: grad(colorFn, rng), color: undefined };
-    return { color: colorFn(rng), gradient: undefined };
-  }
-
   // Solid-or-gradient fill for the background
-  function bgFill(isDark: boolean, rng: () => number): Pick<Required<Options>["backgroundOptions"], "color" | "gradient"> {
+  function bgFill(
+    isDark: boolean,
+    rng: () => number,
+  ): Pick<Required<Options>["backgroundOptions"], "color" | "gradient"> {
     const colorFn = isDark ? deepC : pastelC;
     if (rng() < 0.55) return { gradient: grad(colorFn, rng), color: undefined };
     return { color: colorFn(rng), gradient: undefined };
@@ -390,13 +449,22 @@ function makeGen(tc: RT) {
     return Array.from({ length: layerCount }, (_, i) => ({
       fill: layerFill(colorFn, rng),
       mask: i === 0 ? undefined : mask(rng),
-      opacity: i === 0 ? 1 : (isDark ? 0.18 + rng() * 0.32 : 0.4 + rng() * 0.5),
+      opacity: i === 0 ? 1 : isDark ? 0.18 + rng() * 0.32 : 0.4 + rng() * 0.5,
     }));
   }
 
   const BLEND_MODES = [
-    "screen", "multiply", "overlay", "darken", "lighten",
-    "hard-light", "soft-light", "color-dodge", "color-burn", "difference", "exclusion",
+    "screen",
+    "multiply",
+    "overlay",
+    "darken",
+    "lighten",
+    "hard-light",
+    "soft-light",
+    "color-dodge",
+    "color-burn",
+    "difference",
+    "exclusion",
   ] as const;
   const EFFECT_TARGETS = ["dots", "eyes", "all"] as const;
   const ANIM_TARGETS_PULSE = ["dots", "eyes", "all"] as const;
@@ -404,14 +472,28 @@ function makeGen(tc: RT) {
   const DRAW_DIRS = ["ltr", "ttb", "rtl", "btt"] as const;
 
   function randomColor(rng: () => number): string {
-    return hslToHex(Math.floor(rng() * 360), 70 + Math.floor(rng() * 30), 50 + Math.floor(rng() * 20));
+    return hslToHex(
+      Math.floor(rng() * 360),
+      70 + Math.floor(rng() * 30),
+      50 + Math.floor(rng() * 20),
+    );
   }
 
   // Blend modes safe for each theme.
   // Light bg (dark dots): avoid screen/lighten/color-dodge which wash out dark modules.
   // Dark  bg (light dots): avoid multiply/darken/color-burn which kill light modules.
-  const SAFE_BLEND_LIGHT = ["multiply", "darken", "soft-light", "overlay"] as const;
-  const SAFE_BLEND_DARK  = ["screen", "lighten", "soft-light", "overlay"] as const;
+  const SAFE_BLEND_LIGHT = [
+    "multiply",
+    "darken",
+    "soft-light",
+    "overlay",
+  ] as const;
+  const SAFE_BLEND_DARK = [
+    "screen",
+    "lighten",
+    "soft-light",
+    "overlay",
+  ] as const;
 
   function randomEffects(rng: () => number, isDark: boolean): QrEffect[] {
     const out: QrEffect[] = [];
@@ -421,8 +503,8 @@ function makeGen(tc: RT) {
       out.push({
         type: "drop-shadow",
         target: pick(EFFECT_TARGETS, rng),
-        dx: (rng() * 2 - 1),
-        dy: (rng() * 2 - 1),
+        dx: rng() * 2 - 1,
+        dy: rng() * 2 - 1,
         blur: dur(0.3, 1.5),
         color: randomColor(rng),
         opacity: 0.3 + rng() * 0.35,
@@ -457,8 +539,8 @@ function makeGen(tc: RT) {
       out.push({
         type: "liquid",
         target: "dots",
-        blur: dur(0.15, 0.30),
-        threshold: 0.05 + rng() * 0.10,
+        blur: dur(0.15, 0.3),
+        threshold: 0.05 + rng() * 0.1,
       });
     }
     if (rng() < tc.fxBlend && out.length < tc.fxMax) {
@@ -469,7 +551,7 @@ function makeGen(tc: RT) {
         color: randomColor(rng),
         // Cap opacity low: high-opacity blend + screen/multiply dramatically reduces
         // effective contrast even when dot colors pass the normalizer.
-        opacity: 0.10 + rng() * 0.20,
+        opacity: 0.1 + rng() * 0.2,
       });
     }
     if (rng() < tc.fxNoise && out.length < tc.fxMax) {
@@ -486,9 +568,14 @@ function makeGen(tc: RT) {
       // Duotone: pick a saturated hue; map dark→dark-hue, light→light-hue.
       // The contrast between them is always high because we use extreme lightness.
       const h = Math.floor(rng() * 360);
-      const colorDark  = isDark ? hslToHex(h, 70, 75) : hslToHex(h, 80, 15);
+      const colorDark = isDark ? hslToHex(h, 70, 75) : hslToHex(h, 80, 15);
       const colorLight = isDark ? hslToHex(h, 30, 12) : hslToHex(h, 20, 92);
-      out.push({ type: "duotone", target: pick(EFFECT_TARGETS, rng), colorDark, colorLight });
+      out.push({
+        type: "duotone",
+        target: pick(EFFECT_TARGETS, rng),
+        colorDark,
+        colorLight,
+      });
     }
     if (rng() < tc.fxEmboss && out.length < tc.fxMax) {
       const DIRS = ["ne", "se", "sw", "nw"] as const;
@@ -504,7 +591,7 @@ function makeGen(tc: RT) {
       out.push({
         type: "color-split",
         target: pick(EFFECT_TARGETS, rng),
-        offset: 0.20 + rng() * 0.30,
+        offset: 0.2 + rng() * 0.3,
         direction: rng() < 0.5 ? "horizontal" : "vertical",
       });
     }
@@ -515,10 +602,15 @@ function makeGen(tc: RT) {
     const out: QrAnimation[] = [];
     const [durMin, durMax] = tc.anDurRange;
     const dur = () => +(durMin + rng() * (durMax - durMin)).toFixed(2);
-    const delay = () => rng() < 0.4 ? +(rng() * 0.5).toFixed(2) : 0;
+    const delay = () => (rng() < 0.4 ? +(rng() * 0.5).toFixed(2) : 0);
 
     if (rng() < tc.anPulse && out.length < tc.anMax) {
-      out.push({ type: "pulse", target: pick(ANIM_TARGETS_PULSE, rng), duration: dur(), delay: delay() });
+      out.push({
+        type: "pulse",
+        target: pick(ANIM_TARGETS_PULSE, rng),
+        duration: dur(),
+        delay: delay(),
+      });
     }
     if (rng() < tc.anShimmer && out.length < tc.anMax) {
       out.push({
@@ -531,7 +623,12 @@ function makeGen(tc: RT) {
       });
     }
     if (rng() < tc.anDraw && out.length < tc.anMax) {
-      out.push({ type: "draw", direction: pick(DRAW_DIRS, rng), duration: dur(), delay: delay() });
+      out.push({
+        type: "draw",
+        direction: pick(DRAW_DIRS, rng),
+        duration: dur(),
+        delay: delay(),
+      });
     }
     if (rng() < tc.anGlow && out.length < tc.anMax) {
       out.push({
@@ -565,7 +662,7 @@ function makeGen(tc: RT) {
       out.push({
         type: "spotlight",
         color: randomColor(rng),
-        opacity: 0.20 + rng() * 0.25,
+        opacity: 0.2 + rng() * 0.25,
         radius: 30 + rng() * 20,
         duration: dur(),
         delay: delay(),
@@ -586,19 +683,25 @@ function makeGen(tc: RT) {
   return {
     darkC,
     vividC,
-    partFill,
     bgFill,
     layerFill,
     maskLayers,
     overlays,
-    randomEffects: (rng: () => number, isDark: boolean) => randomEffects(rng, isDark),
+    randomEffects: (rng: () => number, isDark: boolean) =>
+      randomEffects(rng, isDark),
     randomAnimations,
     dotShape: (rng: () => number) =>
       rng() < tc.dotIconChance
         ? { type: "icon" as const, path: pick(tc.dotIcons, rng) as string }
         : { type: "figure" as const, path: pick(tc.dotFigures, rng) as string },
-    innerEyeShape: (rng: () => number) => ({ type: "icon" as const, path: pick(tc.innerEye, rng) as string }),
-    outerEyeShape: (rng: () => number) => ({ type: "icon" as const, path: pick(tc.outerEye, rng) as string }),
+    innerEyeShape: (rng: () => number) => ({
+      type: "icon" as const,
+      path: pick(tc.innerEye, rng) as string,
+    }),
+    outerEyeShape: (rng: () => number) => ({
+      type: "icon" as const,
+      path: pick(tc.outerEye, rng) as string,
+    }),
   };
 }
 
@@ -646,7 +749,7 @@ export function randomizeOptions(
   seed?: number,
   tuning?: RandomizeTuning,
 ): Options {
-  const rng = mulberry32(seed ?? (Date.now() & 0xffffffff));
+  const rng = mulberry32(seed ?? Date.now() & 0xffffffff);
   const result: Options = { ...base };
   const tc = resolveT(tuning);
   const gen = makeGen(tc);
@@ -654,30 +757,37 @@ export function randomizeOptions(
   const isDark = !!config.backgroundColor && rng() < tc.darkThemeChance;
 
   // Resolve deprecated aliases so the rest of the function only checks the canonical names.
-  const dotsOv    = config.dotsOverlays       ?? config.dotsPattern        ?? false;
-  const dotsDotOv = config.cornersDotOverlays ?? config.cornersDotPattern   ?? false;
-  const sqOv      = config.cornersSquareOverlays ?? config.cornersSquarePattern ?? false;
+  const dotsOv = config.dotsOverlays ?? config.dotsPattern ?? false;
+  const dotsDotOv =
+    config.cornersDotOverlays ?? config.cornersDotPattern ?? false;
+  const sqOv =
+    config.cornersSquareOverlays ?? config.cornersSquarePattern ?? false;
 
   // combined=true: base fill becomes overlay layer 0, mask layers stack on top.
   // combined=false: full independent overlay set (base + optional mask).
   function buildOverlays(combined: boolean): QrOverlay[] {
     if (combined) {
       const colorFn = isDark ? gen.vividC : gen.darkC;
-      return [{ fill: gen.layerFill(colorFn, rng) }, ...gen.maskLayers(isDark, rng)];
+      return [
+        { fill: gen.layerFill(colorFn, rng) },
+        ...gen.maskLayers(isDark, rng),
+      ];
     }
     return gen.overlays(isDark, rng);
   }
 
   // --- dots ---
+  const simpleOverlay = (): QrOverlay[] => {
+    const colorFn = isDark ? gen.vividC : gen.darkC;
+    return [{ fill: gen.layerFill(colorFn, rng) }];
+  };
+
   if (config.dotsColor || config.dotsShape || dotsOv) {
     result.dotsOptions = { ...base.dotsOptions };
     if (dotsOv) {
       result.dotsOptions.overlays = buildOverlays(!!config.dotsColor);
-      result.dotsOptions.color = undefined;
-      result.dotsOptions.gradient = undefined;
     } else if (config.dotsColor) {
-      Object.assign(result.dotsOptions, gen.partFill(isDark, rng));
-      result.dotsOptions.overlays = undefined;
+      result.dotsOptions.overlays = simpleOverlay();
     }
     if (config.dotsShape) {
       result.dotsOptions.shape = gen.dotShape(rng) as QrShape;
@@ -689,11 +799,8 @@ export function randomizeOptions(
     result.cornersDotOptions = { ...base.cornersDotOptions };
     if (dotsDotOv) {
       result.cornersDotOptions.overlays = buildOverlays(!!config.cornersDotColor);
-      result.cornersDotOptions.color = undefined;
-      result.cornersDotOptions.gradient = undefined;
     } else if (config.cornersDotColor) {
-      Object.assign(result.cornersDotOptions, gen.partFill(isDark, rng));
-      result.cornersDotOptions.overlays = undefined;
+      result.cornersDotOptions.overlays = simpleOverlay();
     }
     if (config.cornersDotShape) {
       result.cornersDotOptions.shape = gen.innerEyeShape(rng) as QrShape;
@@ -705,11 +812,8 @@ export function randomizeOptions(
     result.cornersSquareOptions = { ...base.cornersSquareOptions };
     if (sqOv) {
       result.cornersSquareOptions.overlays = buildOverlays(!!config.cornersSquareColor);
-      result.cornersSquareOptions.color = undefined;
-      result.cornersSquareOptions.gradient = undefined;
     } else if (config.cornersSquareColor) {
-      Object.assign(result.cornersSquareOptions, gen.partFill(isDark, rng));
-      result.cornersSquareOptions.overlays = undefined;
+      result.cornersSquareOptions.overlays = simpleOverlay();
     }
     if (config.cornersSquareShape) {
       result.cornersSquareOptions.shape = gen.outerEyeShape(rng) as QrShape;
@@ -761,7 +865,9 @@ export function randomizeOptions(
   // If the user didn't request backgroundColor randomisation but did request
   // effects/animation, silently add a background that fits the theme.
   if (result.effects || result.animation) {
-    const hasBg = !!(result.backgroundOptions?.color || result.backgroundOptions?.gradient);
+    const hasBg = !!(
+      result.backgroundOptions?.color || result.backgroundOptions?.gradient
+    );
     if (!hasBg) {
       const fill = gen.bgFill(isDark, rng);
       result.backgroundOptions = { ...result.backgroundOptions, ...fill };
@@ -790,7 +896,9 @@ function _srgbLinear(c: number): number {
 }
 
 function _rgbLum(r: number, g: number, b: number): number {
-  return 0.2126 * _srgbLinear(r) + 0.7152 * _srgbLinear(g) + 0.0722 * _srgbLinear(b);
+  return (
+    0.2126 * _srgbLinear(r) + 0.7152 * _srgbLinear(g) + 0.0722 * _srgbLinear(b)
+  );
 }
 
 function _hexLum(hex: string): number {
@@ -802,8 +910,11 @@ function _wcag(la: number, lb: number): number {
 }
 
 function _rgbToHsl(r: number, g: number, b: number): [number, number, number] {
-  const r1 = r / 255, g1 = g / 255, b1 = b / 255;
-  const max = Math.max(r1, g1, b1), min = Math.min(r1, g1, b1);
+  const r1 = r / 255,
+    g1 = g / 255,
+    b1 = b / 255;
+  const max = Math.max(r1, g1, b1),
+    min = Math.min(r1, g1, b1);
   const l = (max + min) / 2;
   if (max === min) return [0, 0, l * 100];
   const d = max - min;
@@ -817,11 +928,18 @@ function _rgbToHsl(r: number, g: number, b: number): [number, number, number] {
 
 // Luminance of an HSL triple without allocating an intermediate hex string
 function _hslLum(h: number, s: number, l: number): number {
-  const sl = s / 100, ll = l / 100;
+  const sl = s / 100,
+    ll = l / 100;
   const a = sl * Math.min(ll, 1 - ll);
   const f = (n: number) => {
     const k = (n + h / 30) % 12;
-    return Math.max(0, Math.min(255, Math.round(255 * (ll - a * Math.max(Math.min(k - 3, 9 - k, 1), -1)))));
+    return Math.max(
+      0,
+      Math.min(
+        255,
+        Math.round(255 * (ll - a * Math.max(Math.min(k - 3, 9 - k, 1), -1))),
+      ),
+    );
   };
   return _rgbLum(f(0), f(8), f(4));
 }
@@ -834,7 +952,12 @@ function _hslLum(h: number, s: number, l: number): number {
  * makeDarker = true  → decrease L (dots on light background)
  * makeDarker = false → increase L (inverted QR — dots on dark background)
  */
-function _adjustColor(color: string, bgLum: number, minRatio: number, makeDarker: boolean): string {
+function _adjustColor(
+  color: string,
+  bgLum: number,
+  minRatio: number,
+  makeDarker: boolean,
+): string {
   const [r, g, b] = _hexToRgb(color);
   if (_wcag(_rgbLum(r, g, b), bgLum) >= minRatio) return color;
 
@@ -846,10 +969,12 @@ function _adjustColor(color: string, bgLum: number, minRatio: number, makeDarker
     const mid = (lo + hi) / 2;
     if (makeDarker) {
       // Maximize L (least darkening) while ratio >= minRatio
-      if (_wcag(_hslLum(h, s, mid), bgLum) >= minRatio) lo = mid; else hi = mid;
+      if (_wcag(_hslLum(h, s, mid), bgLum) >= minRatio) lo = mid;
+      else hi = mid;
     } else {
       // Minimize L (least lightening) while ratio >= minRatio
-      if (_wcag(_hslLum(h, s, mid), bgLum) >= minRatio) hi = mid; else lo = mid;
+      if (_wcag(_hslLum(h, s, mid), bgLum) >= minRatio) hi = mid;
+      else lo = mid;
     }
   }
 
@@ -870,10 +995,13 @@ function _partLum(part: QrPartOptions | undefined): number | null {
   if (!part) return null;
   if (part.overlays?.length) {
     const base = part.overlays.find((o) => !o.mask);
-    if (base) return base.fill.type === "color" ? _hexLum(base.fill.color) : base.fill.type === "gradient" ? _gradLum(base.fill.gradient) : 1;
+    if (base)
+      return base.fill.type === "color"
+        ? _hexLum(base.fill.color)
+        : base.fill.type === "gradient"
+          ? _gradLum(base.fill.gradient)
+          : 1;
   }
-  if (part.gradient) return _gradLum(part.gradient);
-  if (part.color !== undefined) return _hexLum(part.color);
   return null;
 }
 
@@ -885,16 +1013,37 @@ function _bgLum(options: Options): number {
   return _hexLum(bg.color ?? "#ffffff");
 }
 
-function _adjustGradient(g: Gradient, bgLum: number, minRatio: number, darker: boolean): Gradient {
+function _adjustGradient(
+  g: Gradient,
+  bgLum: number,
+  minRatio: number,
+  darker: boolean,
+): Gradient {
   return {
     ...g,
-    colorStops: g.colorStops.map((s) => ({ ...s, color: _adjustColor(s.color, bgLum, minRatio, darker) })),
+    colorStops: g.colorStops.map((s) => ({
+      ...s,
+      color: _adjustColor(s.color, bgLum, minRatio, darker),
+    })),
   };
 }
 
-function _adjustFill(fill: QrLayerFill, bgLum: number, minRatio: number, darker: boolean): QrLayerFill {
-  if (fill.type === "color") return { type: "color", color: _adjustColor(fill.color, bgLum, minRatio, darker) };
-  if (fill.type === "gradient") return { type: "gradient", gradient: _adjustGradient(fill.gradient, bgLum, minRatio, darker) };
+function _adjustFill(
+  fill: QrLayerFill,
+  bgLum: number,
+  minRatio: number,
+  darker: boolean,
+): QrLayerFill {
+  if (fill.type === "color")
+    return {
+      type: "color",
+      color: _adjustColor(fill.color, bgLum, minRatio, darker),
+    };
+  if (fill.type === "gradient")
+    return {
+      type: "gradient",
+      gradient: _adjustGradient(fill.gradient, bgLum, minRatio, darker),
+    };
   return fill; // image fills are not adjusted
 }
 
@@ -915,28 +1064,38 @@ function _adjustPart(
       // If their color blends into the background, those dot regions become invisible to scanners.
       const opacity = o.opacity ?? 1;
       if (opacity >= 0.35) {
-        const lum = o.fill.type === "color" ? _hexLum(o.fill.color) : o.fill.type === "gradient" ? _gradLum(o.fill.gradient) : 1;
+        const lum =
+          o.fill.type === "color"
+            ? _hexLum(o.fill.color)
+            : o.fill.type === "gradient"
+              ? _gradLum(o.fill.gradient)
+              : 1;
         if (_wcag(lum, bgLum) < minRatio) {
           return { ...o, fill: _adjustFill(o.fill, bgLum, minRatio, darker) };
         }
       }
       return o;
     });
-  } else if (part.gradient) {
-    result.gradient = _adjustGradient(part.gradient, bgLum, minRatio, darker);
-  } else if (part.color !== undefined) {
-    result.color = _adjustColor(part.color, bgLum, minRatio, darker);
   }
   return result;
 }
 
-function _hasProblematicMaskedLayer(part: QrPartOptions | undefined, bgLum: number, minRatio: number): boolean {
+function _hasProblematicMaskedLayer(
+  part: QrPartOptions | undefined,
+  bgLum: number,
+  minRatio: number,
+): boolean {
   if (!part?.overlays?.length) return false;
   return part.overlays.some((o) => {
     if (!o.mask) return false;
     const opacity = o.opacity ?? 1;
     if (opacity < 0.35) return false;
-    const lum = o.fill.type === "color" ? _hexLum(o.fill.color) : o.fill.type === "gradient" ? _gradLum(o.fill.gradient) : 1;
+    const lum =
+      o.fill.type === "color"
+        ? _hexLum(o.fill.color)
+        : o.fill.type === "gradient"
+          ? _gradLum(o.fill.gradient)
+          : 1;
     return _wcag(lum, bgLum) < minRatio;
   });
 }
@@ -965,14 +1124,21 @@ export function normalizeOptions(base: Options, minContrast = 3.0): Options {
   // the luminance difference between dark modules and light background/gaps).
   let effectiveMin = minContrast;
   for (const fx of (base.effects as any[] | undefined) ?? []) {
-    if      (fx.type === "blend")       effectiveMin = Math.max(effectiveMin, minContrast + 2.5);
-    else if (fx.type === "neon-glow")   effectiveMin = Math.max(effectiveMin, minContrast + 2.0);
-    else if (fx.type === "liquid")      effectiveMin = Math.max(effectiveMin, minContrast + 1.5);
-    else if (fx.type === "morphology")  effectiveMin = Math.max(effectiveMin, minContrast + 1.0);
-    else if (fx.type === "drop-shadow") effectiveMin = Math.max(effectiveMin, minContrast + 0.5);
+    if (fx.type === "blend")
+      effectiveMin = Math.max(effectiveMin, minContrast + 2.5);
+    else if (fx.type === "neon-glow")
+      effectiveMin = Math.max(effectiveMin, minContrast + 2.0);
+    else if (fx.type === "liquid")
+      effectiveMin = Math.max(effectiveMin, minContrast + 1.5);
+    else if (fx.type === "morphology")
+      effectiveMin = Math.max(effectiveMin, minContrast + 1.0);
+    else if (fx.type === "drop-shadow")
+      effectiveMin = Math.max(effectiveMin, minContrast + 0.5);
     // New effects — all are luminance-safe but require extra headroom for safety
-    else if (fx.type === "noise")       effectiveMin = Math.max(effectiveMin, minContrast + 0.5);
-    else if (fx.type === "emboss")      effectiveMin = Math.max(effectiveMin, minContrast + 0.5);
+    else if (fx.type === "noise")
+      effectiveMin = Math.max(effectiveMin, minContrast + 0.5);
+    else if (fx.type === "emboss")
+      effectiveMin = Math.max(effectiveMin, minContrast + 0.5);
     // duotone replaces all colors — normalizer can't help, contrast is set by the duotone colors themselves
     // color-split, noise: no effective contrast reduction on pure-black dots
   }
@@ -980,25 +1146,42 @@ export function normalizeOptions(base: Options, minContrast = 3.0): Options {
 
   const bgLum = _bgLum(base);
   const dotsLum = _partLum(base.dotsOptions) ?? 0;
-  const csLum   = _partLum(base.cornersSquareOptions);
-  const cdLum   = _partLum(base.cornersDotOptions);
+  const csLum = _partLum(base.cornersSquareOptions);
+  const cdLum = _partLum(base.cornersDotOptions);
   const darkenDots = dotsLum <= bgLum;
 
   const ok = (lum: number | null) =>
     lum === null || _wcag(lum, bgLum) >= minContrast_;
 
   if (
-    ok(dotsLum) && ok(csLum) && ok(cdLum) &&
+    ok(dotsLum) &&
+    ok(csLum) &&
+    ok(cdLum) &&
     !_hasProblematicMaskedLayer(base.dotsOptions, bgLum, minContrast_) &&
-    !_hasProblematicMaskedLayer(base.cornersSquareOptions, bgLum, minContrast_) &&
+    !_hasProblematicMaskedLayer(
+      base.cornersSquareOptions,
+      bgLum,
+      minContrast_,
+    ) &&
     !_hasProblematicMaskedLayer(base.cornersDotOptions, bgLum, minContrast_)
-  ) return base;
+  )
+    return base;
 
   return {
     ...base,
     dotsOptions: _adjustPart(base.dotsOptions, bgLum, minContrast_, darkenDots),
-    cornersSquareOptions: _adjustPart(base.cornersSquareOptions, bgLum, minContrast_, darkenDots),
-    cornersDotOptions: _adjustPart(base.cornersDotOptions, bgLum, minContrast_, darkenDots),
+    cornersSquareOptions: _adjustPart(
+      base.cornersSquareOptions,
+      bgLum,
+      minContrast_,
+      darkenDots,
+    ),
+    cornersDotOptions: _adjustPart(
+      base.cornersDotOptions,
+      bgLum,
+      minContrast_,
+      darkenDots,
+    ),
   };
 }
 
@@ -1018,18 +1201,23 @@ function invertGradient(g: Gradient): Gradient {
 }
 
 function invertLayerFill(fill: QrLayerFill): QrLayerFill {
-  if (fill.type === "color") return { type: "color", color: invertHex(fill.color) };
-  if (fill.type === "gradient") return { type: "gradient", gradient: invertGradient(fill.gradient) };
+  if (fill.type === "color")
+    return { type: "color", color: invertHex(fill.color) };
+  if (fill.type === "gradient")
+    return { type: "gradient", gradient: invertGradient(fill.gradient) };
   return fill; // image fills are not inverted
 }
 
-function invertPart(part: QrPartOptions | undefined): QrPartOptions | undefined {
+function invertPart(
+  part: QrPartOptions | undefined,
+): QrPartOptions | undefined {
   if (!part) return part;
   return {
     ...part,
-    color: part.color !== undefined ? invertHex(part.color) : undefined,
-    gradient: part.gradient !== undefined ? invertGradient(part.gradient) : undefined,
-    overlays: part.overlays?.map((o) => ({ ...o, fill: invertLayerFill(o.fill) })),
+    overlays: part.overlays?.map((o) => ({
+      ...o,
+      fill: invertLayerFill(o.fill),
+    })),
   };
 }
 

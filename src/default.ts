@@ -14,14 +14,14 @@ export const defaultOptions: Required<
   },
   dotsOptions: {
     shape: { type: "icon", path: "dots-square" },
-    color: "#000000",
+    overlays: [{ fill: { type: "color", color: "#000000" } }],
   },
   cornersDotOptions: {
     shape: { type: "icon", path: "inner-eye-square" },
-    color: "#000000",
+    overlays: [{ fill: { type: "color", color: "#000000" } }],
   },
   cornersSquareOptions: {
     shape: { type: "icon", path: "outer-eye-square" },
-    color: "#000000",
+    overlays: [{ fill: { type: "color", color: "#000000" } }],
   },
 };
