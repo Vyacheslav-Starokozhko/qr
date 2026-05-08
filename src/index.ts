@@ -38,6 +38,10 @@ import {
   QrAnimation,
   QrShape,
   EQrPart,
+  ECornerDotFigure,
+  ECornerSquareFigure,
+  EDotFigure,
+  EShapeType,
 } from "./types";
 
 export {
@@ -61,6 +65,10 @@ export {
   QrShape,
   QrPartOptions,
   EQrPart,
+  ECornerDotFigure,
+  ECornerSquareFigure,
+  EDotFigure,
+  EShapeType,
 };
 
 /**
