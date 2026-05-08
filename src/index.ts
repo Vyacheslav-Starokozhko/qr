@@ -37,6 +37,7 @@ import {
   QrFrame,
   QrAnimation,
   QrShape,
+  EQrPart,
 } from "./types";
 
 export {
@@ -59,6 +60,7 @@ export {
   QrEffect,
   QrShape,
   QrPartOptions,
+  EQrPart,
 };
 
 /**
