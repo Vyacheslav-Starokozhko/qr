@@ -43,6 +43,9 @@ import {
   EDotFigure,
   EShapeType,
   Gradient,
+  FigureShape,
+  QrPart,
+  ShapeType,
 } from "./types";
 
 export {
@@ -77,6 +80,9 @@ export {
   QRMatrix,
   // Gradient
   Gradient,
+  FigureShape,
+  QrPart,
+  ShapeType,
 };
 
 /**
@@ -369,7 +375,9 @@ export interface QRCodeHandle extends QRCodeGenerateResult {
  * await qr.update({ dotsOptions: { overlays: [{ fill: { type: 'color', color: '#e11d48' } }] } });
  * document.body.innerHTML = qr.svg;
  */
-export async function createQRCode(initialOptions: Options): Promise<QRCodeHandle> {
+export async function createQRCode(
+  initialOptions: Options,
+): Promise<QRCodeHandle> {
   let opts: Options = { ...initialOptions };
   let cachedMatrix: QRMatrix | null = null;
   let cachedData = "";
