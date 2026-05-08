@@ -821,13 +821,13 @@ export type Options = {
    * SVG filter effects (drop shadow, neon glow, morphology, liquid metaball,
    * blend-mode overlay). Pass a single effect or an array to stack.
    */
-  effects?: QrEffect | QrEffect[];
+  effects?: QrEffect[];
 
   /**
    * SVG animations applied to the generated code.
    * Pass a single animation or an array to stack multiple effects.
    */
-  animation?: QrAnimation | QrAnimation[];
+  animation?: QrAnimation[];
 };
 
 export enum EShapeType {

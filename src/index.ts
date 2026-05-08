@@ -2328,9 +2328,7 @@ export async function QRCodeGenerate(
   );
 
   // Effects (static SVG filters + blend modes)
-  const fxList: QrEffect[] = config.effects
-    ? (Array.isArray(config.effects) ? config.effects : [config.effects])
-    : [];
+  const fxList: QrEffect[] = config.effects ?? [];
   const {
     defs: fxDefs,
     wrapDots: fxWrapDots,
@@ -2340,9 +2338,7 @@ export async function QRCodeGenerate(
   } = buildEffects(fxList, fullSize, String(_uid), config.dotsOptions?.color ?? "#000000");
 
   // Animation (temporal wrappers applied on top of effects)
-  const animList: QrAnimation[] = config.animation
-    ? (Array.isArray(config.animation) ? config.animation : [config.animation])
-    : [];
+  const animList: QrAnimation[] = config.animation ?? [];
   const {
     defs: animDefs,
     wrapDots: animWrapDots,
