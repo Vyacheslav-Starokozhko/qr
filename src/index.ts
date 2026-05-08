@@ -42,6 +42,7 @@ import {
   ECornerSquareFigure,
   EDotFigure,
   EShapeType,
+  Gradient,
 } from "./types";
 
 export {
@@ -69,6 +70,13 @@ export {
   ECornerSquareFigure,
   EDotFigure,
   EShapeType,
+  // Validation
+  ValidatorTuning,
+  QRValidateResult,
+  // Matrix
+  QRMatrix,
+  // Gradient
+  Gradient,
 };
 
 /**
@@ -331,6 +339,125 @@ export async function QRCodeGenerate(
       return validateQRCanvas(canvas, matrix, margin, ecl, tuning);
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Live handle — createQRCode
+// ---------------------------------------------------------------------------
+
+/**
+ * A live QR code handle returned by {@link createQRCode}.
+ * Call {@link QRCodeHandle.update} to re-render with new options — the QR
+ * matrix is cached and reused when `data` and `errorCorrectionLevel` are
+ * unchanged, so style-only updates skip the expensive encoding step.
+ */
+export interface QRCodeHandle extends QRCodeGenerateResult {
+  update(partialOptions: Partial<Options>): Promise<QRCodeHandle>;
+}
+
+/**
+ * Create a stateful QR code instance that supports incremental updates.
+ *
+ * Unlike {@link QRCodeGenerate}, the handle caches the QR matrix and only
+ * re-encodes when `data` or `errorCorrectionLevel` changes. Style-only
+ * changes (colors, shapes, overlays, …) re-render the SVG directly.
+ *
+ * @example
+ * const qr = await createQRCode({ data: 'https://example.com', width: 400 });
+ * document.body.innerHTML = qr.svg;
+ *
+ * await qr.update({ dotsOptions: { overlays: [{ fill: { type: 'color', color: '#e11d48' } }] } });
+ * document.body.innerHTML = qr.svg;
+ */
+export async function createQRCode(initialOptions: Options): Promise<QRCodeHandle> {
+  let opts: Options = { ...initialOptions };
+  let cachedMatrix: QRMatrix | null = null;
+  let cachedData = "";
+  let cachedEcl = "";
+
+  async function build(): Promise<QRCodeGenerateResult> {
+    const merged = { ...defaultOptions, ...opts };
+    const ecl = merged.qrOptions?.errorCorrectionLevel ?? "H";
+    const data = merged.data ?? "";
+    if (!cachedMatrix || data !== cachedData || ecl !== cachedEcl) {
+      cachedMatrix = new QRAnalyzer(data, ecl).getMatrix();
+      cachedData = data;
+      cachedEcl = ecl;
+    }
+    return QRCodeGenerate(opts);
+  }
+
+  const initial = await build();
+  const handle: QRCodeHandle = {
+    svg: initial.svg,
+    matrix: initial.matrix,
+    validate: initial.validate,
+    async update(partialOptions: Partial<Options>): Promise<QRCodeHandle> {
+      opts = { ...opts, ...partialOptions };
+      const result = await build();
+      handle.svg = result.svg;
+      handle.matrix = result.matrix;
+      handle.validate = result.validate;
+      return handle;
+    },
+  };
+  return handle;
+}
+
+// ---------------------------------------------------------------------------
+// DOM utility — crossFadeQR
+// ---------------------------------------------------------------------------
+
+export interface CrossFadeOptions {
+  /** Cross-fade duration in ms. 0 = instant swap. Default: 250. */
+  duration?: number;
+  /** CSS easing. Default: "ease-in-out". */
+  easing?: string;
+}
+
+/**
+ * Swap the QR SVG inside `container` with a smooth cross-fade.
+ *
+ * The container must have `position: relative` (or absolute/fixed).
+ * The incoming SVG is overlaid on top and faded in while the outgoing one
+ * fades out, then the outgoing element is removed.
+ *
+ * @example
+ * const qr = await createQRCode({ data: 'https://example.com', width: 400 });
+ * container.innerHTML = qr.svg;
+ *
+ * await qr.update({ dotsOptions: { overlays: [{ fill: { type: 'color', color: '#e11d48' } }] } });
+ * await crossFadeQR(container, qr.svg);
+ */
+export async function crossFadeQR(
+  container: Element,
+  newSvg: string,
+  options: CrossFadeOptions = {},
+): Promise<void> {
+  const duration = options.duration ?? 250;
+  const easing = options.easing ?? "ease-in-out";
+
+  const outgoing = container.firstElementChild as HTMLElement | null;
+
+  const incoming = document.createElement("div");
+  incoming.style.cssText = "position:absolute;inset:0;opacity:0;";
+  incoming.innerHTML = newSvg;
+  container.appendChild(incoming);
+
+  if (!duration || !outgoing) {
+    if (outgoing) outgoing.remove();
+    incoming.style.cssText = "";
+    return;
+  }
+
+  await incoming.animate([{ opacity: 0 }, { opacity: 1 }], {
+    duration,
+    easing,
+    fill: "forwards",
+  }).finished;
+
+  outgoing.remove();
+  incoming.style.cssText = "";
 }
 
 // ─── Rendering Internals ───────────────────────────────────────────────────
