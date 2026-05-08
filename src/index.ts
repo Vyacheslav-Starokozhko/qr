@@ -22,7 +22,6 @@ import {
    QrPartOptions,
    QrImage,
    QrImagePosition,
-   Gradient,
    QRValidateResult,
    ValidatorTuning,
    QrDecoration,
@@ -32,7 +31,6 @@ import {
    QrOverlay,
    QrLayerFill,
    QrOverlayMask,
-   QrAnimation,
    QrEffect,
 } from './types';
 
@@ -118,13 +116,36 @@ function _inferGifBg(input: string | Options): string {
    return input.backgroundOptions?.color || '#ffffff';
 }
 
+async function _makeCanvas(svg: string, w: number, h: number): Promise<HTMLCanvasElement | null> {
+   if (typeof document === 'undefined') return null;
+   return new Promise((resolve, reject) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d')!;
+      const img = new Image();
+      const blob = new Blob([svg], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      img.onload = () => { ctx.drawImage(img, 0, 0, w, h); URL.revokeObjectURL(url); resolve(canvas); };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('SVG render failed')); };
+      img.src = url;
+   });
+}
+
 async function _gifExport(
    input: string | Options,
    options: ExportOptions,
 ): Promise<Uint8Array> {
-   const opts = typeof input === 'string' ? { ...defaultOptions, data: input } : input;
-   const frames = await renderSvgBatch(opts, options);
-   return encodeGifFrames(frames, options);
+   const qrOpts = typeof input === 'string' ? ({ ...defaultOptions, data: input } as Options) : input;
+   const { svg } = await QRCodeGenerate(qrOpts);
+   const { width: svgW, height: svgH } = svgDims(svg);
+   const outW = options.width ?? svgW;
+   const outH = options.height ?? svgH;
+   const bg = parseBg(options.background ?? _inferGifBg(input));
+   const fps = options.fps ?? 20;
+   const frameDelay = Math.round(100 / fps);
+   const repeat = options.repeat ?? 0;
+   const frames = await renderSvgBatch([svg], outW, outH, bg);
+   return encodeGifFrames(frames, outW, outH, frameDelay, repeat) as Promise<Uint8Array>;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,17 +174,28 @@ export type QRCodeGenerateResult = {
  */
 export async function QRCodeGenerate(options: Options): Promise<QRCodeGenerateResult> {
    const opts = { ...defaultOptions, ...options };
-   const analyzer = new QRAnalyzer(opts.data || '', opts);
+   const ecl = opts.qrOptions?.errorCorrectionLevel ?? 'H';
+   const analyzer = new QRAnalyzer(opts.data || '', ecl);
    const matrix = analyzer.getMatrix();
+   const margin = opts.margin ?? 4;
 
-   // 1. Generate core SVG
    const svg = _renderSVG(matrix, opts);
+   const { width: svgW, height: svgH } = svgDims(svg);
 
-   // 2. Return result + validator helper
    return {
       svg,
       matrix,
-      validate: (tuning?: ValidatorTuning) => validateQRCanvas(svg, matrix, tuning),
+      validate: async (tuning?: ValidatorTuning) => {
+         const canvas = await _makeCanvas(svg, svgW, svgH);
+         if (!canvas) {
+            return {
+               valid: false, contrastRatio: 1, degradedModules: 0, totalModules: 0,
+               finderPatternsOk: false, timingPatternsOk: false, eccHeadroom: 0,
+               issues: ['validate() requires a browser environment'],
+            };
+         }
+         return validateQRCanvas(canvas, matrix, margin, ecl, tuning);
+      },
    };
 }
 
@@ -197,38 +229,50 @@ function _renderSVG(matrix: QRMatrix, opts: Options): string {
    return svg;
 }
 
+function _partColor(part: QrPartOptions | undefined): string {
+   const base = part?.overlays?.find(o => !o.mask);
+   if (base?.fill.type === 'color') return base.fill.color;
+   if (base?.fill.type === 'gradient') return base.fill.gradient.colorStops[0]?.color ?? '#000000';
+   return '#000000';
+}
+
 function _renderEyes(matrix: QRMatrix, opts: Options): string {
    const size = matrix.length;
+   const sqKey = (opts.cornersSquareOptions?.shape as any)?.path ?? 'square';
+   const dotKey = (opts.cornersDotOptions?.shape as any)?.path ?? 'square';
+   const sqDraw = cornerSquares[sqKey] ?? cornerSquares['square'];
+   const dotDraw = cornerDots[dotKey] ?? cornerDots['square'];
+   const sqColor = _partColor(opts.cornersSquareOptions);
+   const dotColor = _partColor(opts.cornersDotOptions);
+
    let svg = '';
-
-   // Top Left
-   svg += cornerSquares.render(0, 0, opts.cornersSquareOptions);
-   svg += cornerDots.render(0, 0, opts.cornersDotOptions);
-
-   // Top Right
-   svg += cornerSquares.render(size - 7, 0, opts.cornersSquareOptions);
-   svg += cornerDots.render(size - 7, 0, opts.cornersDotOptions);
-
-   // Bottom Left
-   svg += cornerSquares.render(0, size - 7, opts.cornersSquareOptions);
-   svg += cornerDots.render(0, size - 7, opts.cornersDotOptions);
-
+   for (const [ex, ey] of [[0, 0], [size - 7, 0], [0, size - 7]] as [number, number][]) {
+      svg += `<path d="${sqDraw(ex, ey, 7)}" fill="${sqColor}"/>`;
+      svg += `<path d="${dotDraw(ex + 2, ey + 2, 3)}" fill="${dotColor}"/>`;
+   }
    return svg;
 }
 
 function _renderDots(matrix: QRMatrix, opts: Options): string {
-   const neighbors = new Neighbors(matrix);
-   let svg = '';
+   const dotKey = (opts.dotsOptions?.shape as any)?.path ?? 'square';
+   const dotDraw = neighborShapes[dotKey] ?? neighborShapes['square'];
+   const dotColor = _partColor(opts.dotsOptions);
+   const scale = opts.dotsOptions?.scale ?? 1;
+   let pathD = '';
 
    for (let y = 0; y < matrix.length; y++) {
       for (let x = 0; x < matrix.length; x++) {
          if (!matrix[y][x].isDark) continue;
          if (matrix[y][x].type !== 'data') continue;
-
-         const shape = opts.dotsOptions?.shape || { type: 'figure', path: 'square' };
-         svg += neighborShapes.render(x, y, shape, neighbors, opts.dotsOptions);
+         const n: Neighbors = {
+            t: matrix[y - 1]?.[x]?.isDark ?? false,
+            r: matrix[y]?.[x + 1]?.isDark ?? false,
+            b: matrix[y + 1]?.[x]?.isDark ?? false,
+            l: matrix[y]?.[x - 1]?.isDark ?? false,
+         };
+         pathD += dotDraw(x, y, n, scale);
       }
    }
 
-   return svg;
+   return pathD ? `<path d="${pathD}" fill="${dotColor}"/>` : '';
 }
