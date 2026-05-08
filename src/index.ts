@@ -411,9 +411,17 @@ function createSymbol(id: string, part: QrPartOptions): string {
 
   if (shape.type === "image-icon") {
     const par = shape.preserveAspectRatio ?? "xMidYMid slice";
+    // The symbol is used inside a <mask> where fill="white" has no effect on <image> elements.
+    // A feFlood+feComposite filter converts the image to solid white while preserving its alpha,
+    // so SVG luminance masking sees white (visible) wherever the image is non-transparent.
+    const filterId = `${id}-mask-filter`;
     return `
+        <filter id="${filterId}" color-interpolation-filters="sRGB" x="0" y="0" width="1" height="1" filterUnits="objectBoundingBox">
+          <feFlood flood-color="white" result="white"/>
+          <feComposite in="white" in2="SourceGraphic" operator="in"/>
+        </filter>
         <symbol id="${id}" viewBox="0 0 1 1">
-          <image href="${shape.source}" x="0" y="0" width="1" height="1" preserveAspectRatio="${par}"/>
+          <image href="${shape.source}" x="0" y="0" width="1" height="1" preserveAspectRatio="${par}" filter="url(#${filterId})"/>
         </symbol>
       `;
   }

@@ -826,6 +826,7 @@ export function randomizeOptions(
       ...base.backgroundOptions,
       ...gen.bgFill(isDark, rng),
     };
+    result.backgroundEnable = true;
   }
 
   // --- borderRadius ---
