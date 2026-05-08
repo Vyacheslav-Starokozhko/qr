@@ -24,7 +24,7 @@ import {
 import { detectFrameInset } from "./frame-inset";
 import {
   FileExtension, ExportOptions,
-  parseBg, svgDims, svgToRgba, encodeGifFrames, sharpRaster, canvasRaster,
+  parseBg, svgDims, svgToRgba, renderSvgBatch, encodeGifFrames, sharpRaster, canvasRaster,
 } from "./export";
 import { defaultOptions } from "./default";
 
@@ -152,28 +152,36 @@ async function _gifExport(
   const totalFrames = cycleDur > 0 ? Math.round(cycleDur * cycles * fps) : 1;
   const frameDelay  = Math.round(1000 / fps);
 
-  // First SVG — used for dimension detection and frame 0
-  const firstSvg = isSvgString
-    ? (input as string)
-    : (await QRCodeGenerate(input as Options, undefined, 0)).svg;
-
-  const cachedMatrix = isSvgString
-    ? undefined
-    : (await QRCodeGenerate(input as Options, undefined, 0)).matrix;
+  // Generate frame 0 once — reuse both svg and matrix (avoids double QRCodeGenerate)
+  let firstSvg: string;
+  let cachedMatrix: import("./types").QRMatrix | undefined;
+  if (isSvgString) {
+    firstSvg = input as string;
+  } else {
+    const first = await QRCodeGenerate(input as Options, undefined, 0);
+    firstSvg     = first.svg;
+    cachedMatrix = first.matrix;
+  }
 
   const intrinsic = svgDims(firstSvg);
   const outW = opts.width  ?? intrinsic.width;
   const outH = opts.height ?? intrinsic.height;
 
-  // Render all frames to RGBA
-  const frames: Uint8ClampedArray[] = [];
-  for (let f = 0; f < totalFrames; f++) {
-    const svg = (f === 0 || isSvgString)
-      ? firstSvg
-      : (await QRCodeGenerate(input as Options, cachedMatrix, (f / fps) % cycleDur)).svg;
-    frames.push(await svgToRgba(svg, outW, outH, bg));
+  // Build all SVG strings first (pure CPU — fast string construction)
+  const svgs: string[] = [firstSvg];
+  for (let f = 1; f < totalFrames; f++) {
+    if (isSvgString) {
+      svgs.push(firstSvg);
+    } else {
+      const { svg } = await QRCodeGenerate(input as Options, cachedMatrix, (f / fps) % cycleDur);
+      svgs.push(svg);
+    }
   }
 
+  // Batch-render all SVGs to RGBA (canvas reuse in browser, parallel in Node.js)
+  const frames = await renderSvgBatch(svgs, outW, outH, bg);
+
+  // Encode: global palette + frame deduplication handled inside encodeGifFrames
   return encodeGifFrames(frames, outW, outH, frameDelay, repeat);
 }
 
@@ -824,6 +832,11 @@ export interface QRGenerateResult extends QRGenerateResultBase {
    * Returns an error result when called in a non-browser environment.
    */
   validate: (tuning?: ValidatorTuning) => QRValidateResult;
+  /**
+   * Returns the computed pixel value for a config key.
+   * Currently supported keys: `"borderRadius"`.
+   */
+  getOption<K extends "borderRadius">(key: K): number;
 }
 
 async function svgToCanvas(
@@ -1829,7 +1842,11 @@ export async function QRCodeGenerate(
       }
       return validateQRCanvas(canvas, matrix, effectiveMargin, _ecl, tuning);
     };
-    return { ...base, svg: prefixed, canvas, matrix, validate };
+    const getOption = <K extends "borderRadius">(key: K): number => {
+      if (key === "borderRadius") return (clampedBorderRadius / 100) * (w / 2);
+      return 0;
+    };
+    return { ...base, svg: prefixed, canvas, matrix, validate, getOption };
   };
 
   const fullSize = matrixSize + effectiveMargin * 2;
@@ -2703,7 +2720,7 @@ export async function QRCodeGenerate(
   }
 
   // --- Frame composition ---
-  const frame = config.frame;
+  const frame = config.frameEnable !== false ? config.frame : undefined;
 
   if (frame) {
     // Resolve inset (where QR sits inside the frame), in frame pixels
@@ -2938,6 +2955,7 @@ export async function createQRCode(initialOptions: Options): Promise<QRCodeHandl
     maxValues: initial.maxValues,
     getMaxPos: initial.getMaxPos,
     validate: initial.validate,
+    getOption: initial.getOption,
 
     async update(partialOptions: Partial<Options>): Promise<QRCodeHandle> {
       opts = mergeQROptions(opts, partialOptions);
@@ -2950,6 +2968,7 @@ export async function createQRCode(initialOptions: Options): Promise<QRCodeHandl
       handle.maxValues = result.maxValues;
       handle.getMaxPos = result.getMaxPos;
       handle.validate = result.validate;
+      handle.getOption = result.getOption;
       return handle;
     },
   };

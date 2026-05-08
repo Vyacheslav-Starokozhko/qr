@@ -781,6 +781,8 @@ export type Options = {
 
   imageEnable?: boolean; // If false, images[] are not rendered (and dots are not excluded)
 
+  frameEnable?: boolean; // If false, frame is not rendered
+
   backgroundOptions?: {
     color?: string;
     gradient?: Gradient;
