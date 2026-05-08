@@ -499,14 +499,67 @@ function _renderSVG(matrix: QRMatrix, opts: Options): string {
 
   // Dots & Eyes
   svg += `<g transform="translate(${margin * scale}, ${margin * scale}) scale(${scale})">`;
-
-  // Finder Patterns (Eyes)
   svg += _renderEyes(matrix, opts);
-
-  // Data Modules (Dots)
   svg += _renderDots(matrix, opts);
+  svg += "</g>";
 
-  svg += "</g></svg>";
+  // Images (rendered in pixel coords, on top of dots)
+  if (opts.imageEnable !== false && opts.images?.length) {
+    svg += _renderImages(opts.images, totalSize, margin * scale);
+  }
+
+  svg += "</svg>";
+  return svg;
+}
+
+function _renderImages(
+  images: QrImage[],
+  totalSize: number,
+  marginPx: number,
+): string {
+  const qrSize = totalSize - 2 * marginPx;
+  let svg = "";
+
+  for (const img of images) {
+    const w = img.width;
+    const h = img.height;
+    const pos = img.position;
+    let x: number;
+    let y: number;
+
+    if (pos?.type === "custom") {
+      x = marginPx + (pos.x / 100) * qrSize - w / 2;
+      y = marginPx + (pos.y / 100) * qrSize - h / 2;
+    } else {
+      switch (pos?.type ?? "center") {
+        case "top":
+          x = (totalSize - w) / 2; y = marginPx; break;
+        case "bottom":
+          x = (totalSize - w) / 2; y = totalSize - marginPx - h; break;
+        case "left":
+          x = marginPx; y = (totalSize - h) / 2; break;
+        case "right":
+          x = totalSize - marginPx - w; y = (totalSize - h) / 2; break;
+        case "extra-top":
+          x = (totalSize - w) / 2; y = 0; break;
+        case "extra-bottom":
+          x = (totalSize - w) / 2; y = totalSize - h; break;
+        case "extra-left":
+          x = 0; y = (totalSize - h) / 2; break;
+        case "extra-right":
+          x = totalSize - w; y = (totalSize - h) / 2; break;
+        default: // center
+          x = (totalSize - w) / 2; y = (totalSize - h) / 2;
+      }
+    }
+
+    const opacityAttr = img.opacity != null ? ` opacity="${img.opacity}"` : "";
+    const parAttr = img.preserveAspectRatio
+      ? ` preserveAspectRatio="${img.preserveAspectRatio}"`
+      : "";
+    svg += `<image href="${img.source}" x="${x}" y="${y}" width="${w}" height="${h}"${opacityAttr}${parAttr}/>`;
+  }
+
   return svg;
 }
 
