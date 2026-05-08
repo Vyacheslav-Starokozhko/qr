@@ -32,6 +32,7 @@ import {
    QrLayerFill,
    QrOverlayMask,
    QrEffect,
+   QrFrame,
 } from './types';
 
 export { QRShapes, FileExtension, ExportOptions, QrOverlay, QrLayerFill };
@@ -152,6 +153,57 @@ async function _gifExport(
 // Main Entry Point
 // ---------------------------------------------------------------------------
 
+async function _composeWithFrame(qrSvg: string, frame: QrFrame): Promise<string> {
+   const userInset = frame.inset;
+   let inset: { x: number; y: number; width: number; height: number };
+
+   if (userInset && userInset.x != null && userInset.y != null) {
+      inset = { x: userInset.x, y: userInset.y, width: userInset.width, height: userInset.height };
+   } else {
+      const detected = await detectFrameInset(frame.source, frame.width, frame.height);
+      if (detected) {
+         const iw = userInset?.width ?? detected.width;
+         const ih = userInset?.height ?? detected.height;
+         inset = {
+            x: userInset?.x ?? Math.round(detected.x + (detected.width - iw) / 2),
+            y: userInset?.y ?? Math.round(detected.y + (detected.height - ih) / 2),
+            width: iw,
+            height: ih,
+         };
+      } else {
+         const fw = Math.round(frame.width * 0.8);
+         const fh = Math.round(frame.height * 0.8);
+         inset = {
+            x: Math.round((frame.width - fw) / 2),
+            y: Math.round((frame.height - fh) / 2),
+            width: fw,
+            height: fh,
+         };
+      }
+   }
+
+   const qrDisplaySize = Math.min(inset.width, inset.height);
+   const qrX = inset.x + (inset.width - qrDisplaySize) / 2;
+   const qrY = inset.y + (inset.height - qrDisplaySize) / 2;
+   const { width: qrTotalSize } = svgDims(qrSvg);
+   const innerContent = qrSvg.replace(/^<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '');
+
+   return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${frame.width}" height="${frame.height}" viewBox="0 0 ${frame.width} ${frame.height}"><image href="${frame.source}" x="0" y="0" width="${frame.width}" height="${frame.height}" preserveAspectRatio="xMidYMid meet"/><svg x="${qrX}" y="${qrY}" width="${qrDisplaySize}" height="${qrDisplaySize}" viewBox="0 0 ${qrTotalSize} ${qrTotalSize}">${innerContent}</svg></svg>`;
+}
+
+/**
+ * Run the frame inset auto-detection and return the detected QR area rectangle
+ * (in display pixels). Use this to debug auto-positioning or to generate an
+ * explicit `frame.inset` when detection fails.
+ */
+export async function calibrateFrame(
+   source: string,
+   frameWidth: number,
+   frameHeight: number,
+): Promise<{ x: number; y: number; width: number; height: number } | null> {
+   return detectFrameInset(source, frameWidth, frameHeight);
+}
+
 export type QRCodeGenerateResult = {
    svg: string;
    matrix: QRMatrix;
@@ -179,7 +231,12 @@ export async function QRCodeGenerate(options: Options): Promise<QRCodeGenerateRe
    const matrix = analyzer.getMatrix();
    const margin = opts.margin ?? 4;
 
-   const svg = _renderSVG(matrix, opts);
+   let svg = _renderSVG(matrix, opts);
+
+   if (opts.frameEnable !== false && opts.frame) {
+      svg = await _composeWithFrame(svg, opts.frame);
+   }
+
    const { width: svgW, height: svgH } = svgDims(svg);
 
    return {
