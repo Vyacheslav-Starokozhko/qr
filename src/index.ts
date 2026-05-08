@@ -14,7 +14,12 @@ import {
   canvasRaster,
 } from "./export";
 import { detectFrameInset } from "./frame-inset";
-import { invertOptions, RandomizeConfig, randomizeOptions } from "./randomize";
+import {
+  invertOptions,
+  normalizeOptions,
+  RandomizeConfig,
+  randomizeOptions,
+} from "./randomize";
 
 import { cornerDots } from "./renderer/cornerDot";
 import { cornerSquares } from "./renderer/cornerSquare";
@@ -87,6 +92,7 @@ export {
   invertOptions,
   randomizeOptions,
   RandomizeConfig,
+  normalizeOptions,
 };
 
 /**
