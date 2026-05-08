@@ -7,7 +7,6 @@ import {
   ExportOptions,
   parseBg,
   svgDims,
-  svgToRgba,
   renderSvgBatch,
   encodeGifFrames,
   sharpRaster,
@@ -152,25 +151,6 @@ export async function exportQR(
   );
 }
 
-/** sRGB hex → WCAG relative luminance (0–1). */
-function _luminance(hex: string): number {
-  const { r, g, b } = parseBg(hex);
-  const lin = (c: number) => {
-    const s = c / 255;
-    return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
-  };
-  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-}
-
-/** Pick the representative dot color from the first overlay base layer. */
-function _dotColor(opts: Options): string {
-  const base = opts.dotsOptions?.overlays?.find((o) => !o.mask);
-  if (base?.fill.type === "color") return base.fill.color;
-  if (base?.fill.type === "gradient")
-    return base.fill.gradient.colorStops[0]?.color ?? "#000000";
-  return "#000000";
-}
-
 function _inferGifBg(input: string | Options): string {
   if (typeof input === "string") return "#ffffff";
   return input.backgroundOptions?.color || "#ffffff";
@@ -207,11 +187,8 @@ async function _gifExport(
   input: string | Options,
   options: ExportOptions,
 ): Promise<Uint8Array> {
-  const qrOpts =
-    typeof input === "string"
-      ? ({ ...defaultOptions, data: input } as Options)
-      : input;
-  const { svg } = await QRCodeGenerate(qrOpts);
+  const svg =
+    typeof input === "string" ? input : (await QRCodeGenerate(input)).svg;
   const { width: svgW, height: svgH } = svgDims(svg);
   const outW = options.width ?? svgW;
   const outH = options.height ?? svgH;
@@ -402,7 +379,33 @@ export async function createQRCode(
       cachedData = data;
       cachedEcl = ecl;
     }
-    return QRCodeGenerate(opts);
+    const matrix = cachedMatrix;
+    const margin = merged.margin ?? 4;
+    let svg = _renderSVG(matrix, merged);
+    if (merged.frameEnable !== false && merged.frame) {
+      svg = await _composeWithFrame(svg, merged.frame);
+    }
+    const { width: svgW, height: svgH } = svgDims(svg);
+    return {
+      svg,
+      matrix,
+      validate: async (tuning?: ValidatorTuning) => {
+        const canvas = await _makeCanvas(svg, svgW, svgH);
+        if (!canvas) {
+          return {
+            valid: false,
+            contrastRatio: 1,
+            degradedModules: 0,
+            totalModules: 0,
+            finderPatternsOk: false,
+            timingPatternsOk: false,
+            eccHeadroom: 0,
+            issues: ["validate() requires a browser environment"],
+          };
+        }
+        return validateQRCanvas(canvas, matrix, margin, ecl, tuning);
+      },
+    };
   }
 
   const initial = await build();
@@ -571,12 +574,35 @@ function _partColor(part: QrPartOptions | undefined): string {
   return "#000000";
 }
 
+function _eyePart(
+  shape: any,
+  x: number,
+  y: number,
+  size: number,
+  color: string,
+  figureRegistry: Record<string, (x: number, y: number, s: number) => string>,
+): string {
+  if (shape?.type === "icon") {
+    const icon = shapes[shape.path as keyof typeof shapes];
+    if (icon) {
+      return `<svg x="${x}" y="${y}" width="${size}" height="${size}" viewBox="${icon.viewBox}"><path d="${icon.d}" fill="${color}"/></svg>`;
+    }
+  } else if (shape?.type === "custom-icon") {
+    const vb = shape.viewBox ?? "0 0 24 24";
+    return `<svg x="${x}" y="${y}" width="${size}" height="${size}" viewBox="${vb}"><path d="${shape.path}" fill="${color}"/></svg>`;
+  } else if (shape?.type === "image-icon") {
+    const par = shape.preserveAspectRatio ?? "xMidYMid slice";
+    return `<image href="${shape.source}" x="${x}" y="${y}" width="${size}" height="${size}" preserveAspectRatio="${par}"/>`;
+  }
+  const key = shape?.path ?? "square";
+  const draw = figureRegistry[key] ?? figureRegistry["square"];
+  return `<path d="${draw(x, y, size)}" fill="${color}"/>`;
+}
+
 function _renderEyes(matrix: QRMatrix, opts: Options): string {
   const size = matrix.length;
-  const sqKey = (opts.cornersSquareOptions?.shape as any)?.path ?? "square";
-  const dotKey = (opts.cornersDotOptions?.shape as any)?.path ?? "square";
-  const sqDraw = cornerSquares[sqKey] ?? cornerSquares["square"];
-  const dotDraw = cornerDots[dotKey] ?? cornerDots["square"];
+  const sqShape = opts.cornersSquareOptions?.shape as any;
+  const dotShape = opts.cornersDotOptions?.shape as any;
   const sqColor = _partColor(opts.cornersSquareOptions);
   const dotColor = _partColor(opts.cornersDotOptions);
 
@@ -586,23 +612,64 @@ function _renderEyes(matrix: QRMatrix, opts: Options): string {
     [size - 7, 0],
     [0, size - 7],
   ] as [number, number][]) {
-    svg += `<path d="${sqDraw(ex, ey, 7)}" fill="${sqColor}"/>`;
-    svg += `<path d="${dotDraw(ex + 2, ey + 2, 3)}" fill="${dotColor}"/>`;
+    svg += _eyePart(sqShape, ex, ey, 7, sqColor, cornerSquares);
+    svg += _eyePart(dotShape, ex + 2, ey + 2, 3, dotColor, cornerDots);
   }
   return svg;
 }
 
+function _dotIconCell(shape: any, x: number, y: number, size: number, color: string): string {
+  if (shape?.type === "icon") {
+    const icon = shapes[shape.path as keyof typeof shapes];
+    if (icon) {
+      return `<svg x="${x}" y="${y}" width="${size}" height="${size}" viewBox="${icon.viewBox}"><path d="${icon.d}" fill="${color}"/></svg>`;
+    }
+  } else if (shape?.type === "custom-icon") {
+    const vb = shape.viewBox ?? "0 0 24 24";
+    return `<svg x="${x}" y="${y}" width="${size}" height="${size}" viewBox="${vb}"><path d="${shape.path}" fill="${color}"/></svg>`;
+  } else if (shape?.type === "image-icon") {
+    const par = shape.preserveAspectRatio ?? "xMidYMid slice";
+    return `<image href="${shape.source}" x="${x}" y="${y}" width="${size}" height="${size}" preserveAspectRatio="${par}"/>`;
+  }
+  return "";
+}
+
 function _renderDots(matrix: QRMatrix, opts: Options): string {
-  const dotKey = (opts.dotsOptions?.shape as any)?.path ?? "square";
-  const dotDraw = neighborShapes[dotKey] ?? neighborShapes["square"];
+  const dotShape = opts.dotsOptions?.shape as any;
   const dotColor = _partColor(opts.dotsOptions);
   const scale = opts.dotsOptions?.scale ?? 1;
-  let pathD = "";
 
+  if (dotShape?.type === "icon" || dotShape?.type === "custom-icon" || dotShape?.type === "image-icon") {
+    const pad = (1 - scale) / 2;
+    let svg = "";
+    for (let y = 0; y < matrix.length; y++) {
+      for (let x = 0; x < matrix.length; x++) {
+        if (!matrix[y][x].isDark) continue;
+        const t = matrix[y][x].type;
+        if (t === "pos-finder" || t === "pos-separator") continue;
+        svg += _dotIconCell(dotShape, x + pad, y + pad, scale, dotColor);
+      }
+    }
+    return svg || _renderDotsWithFigure(matrix, "square", dotColor, scale);
+  }
+
+  const dotKey = dotShape?.path ?? "square";
+  return _renderDotsWithFigure(matrix, dotKey, dotColor, scale);
+}
+
+function _renderDotsWithFigure(
+  matrix: QRMatrix,
+  key: string,
+  dotColor: string,
+  scale: number,
+): string {
+  const dotDraw = neighborShapes[key] ?? neighborShapes["square"];
+  let pathD = "";
   for (let y = 0; y < matrix.length; y++) {
     for (let x = 0; x < matrix.length; x++) {
       if (!matrix[y][x].isDark) continue;
-      if (matrix[y][x].type !== "data") continue;
+      const t = matrix[y][x].type;
+      if (t === "pos-finder" || t === "pos-separator") continue;
       const n: Neighbors = {
         t: matrix[y - 1]?.[x]?.isDark ?? false,
         r: matrix[y]?.[x + 1]?.isDark ?? false,
@@ -612,6 +679,5 @@ function _renderDots(matrix: QRMatrix, opts: Options): string {
       pathD += dotDraw(x, y, n, scale);
     }
   }
-
   return pathD ? `<path d="${pathD}" fill="${dotColor}"/>` : "";
 }
