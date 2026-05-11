@@ -3405,3 +3405,6 @@ export async function calibrateFrame(
 ): Promise<{ x: number; y: number; width: number; height: number } | null> {
   return detectFrameInset(source, frameWidth, frameHeight);
 }
+
+export { QRCodeWebGL } from "./webgl";
+export type { QRWebGLHandle } from "./webgl";
