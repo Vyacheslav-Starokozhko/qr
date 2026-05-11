@@ -822,15 +822,8 @@ export async function validateQR(
     config.borderRadius != null
       ? Math.max(0, Math.min(100, config.borderRadius))
       : 0;
-  const _brForMargin =
-    config.wrapper?.shape === "circle" || config.wrapper?.shape == null
-      ? config.wrapper
-        ? 100
-        : clampedBR
-      : clampedBR;
-  const _k = (_brForMargin / 100) * (1 - 1 / Math.SQRT2);
-  const minSafeMargin =
-    _k > 0 && _k < 1 ? (_k * matrixSize) / (2 * (1 - _k)) : 0;
+  const _c = _wrapperSafeC(config.wrapper, clampedBR);
+  const minSafeMargin = _c > 0 && _c < 1 ? (_c * matrixSize) / (2 * (1 - _c)) : 0;
   const effectiveMargin = Math.max(margin, minSafeMargin);
 
   const wMatch = svg.match(/\bwidth="([\d.]+)"/);
@@ -1200,6 +1193,41 @@ function generateDecorationsSvg(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Returns the safe-margin coefficient `c` for a given wrapper shape.
+ *
+ * `c = 1 − safeRadiusFactor / √2` where safeRadiusFactor is the ratio of the
+ * shape's minimum boundary distance (from centre) to its outer radius:
+ *   - convex n-gon: apothem / r = cos(π/n)
+ *   - star shapes:  inner vertex ratio (the valley is the closest point)
+ *   - circle/square: 1.0 (no extra margin needed beyond the circle formula)
+ *
+ * Plug `c` into `minSafeMargin = c·matrixSize / (2·(1−c))` to get the margin
+ * (in module units) that keeps every QR corner inside the shape's boundary.
+ */
+function _wrapperSafeC(
+  wrapper: import("./types").QrWrapper | undefined,
+  clampedBorderRadius: number,
+): number {
+  if (wrapper) {
+    const shape = wrapper.shape ?? "circle";
+    if (shape === "square") return 0; // axis-aligned square never clips QR corners
+    const safeRadiusFactor: Record<string, number> = {
+      circle:   1.0,
+      octagon:  Math.cos(Math.PI / 8),  // ≈ 0.924
+      hexagon:  Math.cos(Math.PI / 6),  // ≈ 0.866
+      pentagon: Math.cos(Math.PI / 5),  // ≈ 0.809
+      diamond:  Math.cos(Math.PI / 4),  // ≈ 0.707
+      triangle: Math.cos(Math.PI / 3),  // = 0.500
+      star:     0.45,
+      star4:    0.38,
+    };
+    const f = safeRadiusFactor[shape] ?? 1.0;
+    return 1 - f / Math.SQRT2;
+  }
+  return (clampedBorderRadius / 100) * (1 - 1 / Math.SQRT2);
+}
+
+/**
  * Returns an SVG path string for the given wrapper shape, inscribed in a
  * square of `size` × `size` units with an optional inward `inset`.
  */
@@ -1210,9 +1238,18 @@ function buildWrapperShapePath(
 ): string {
   const cx = size / 2;
   const cy = size / 2;
-  const r = size / 2 - inset;
+  const outerR = size / 2;
 
-  const polygon = (sides: number, rotationDeg = 0): string => {
+  // For a regular n-gon with vertex-radius r, the apothem (perpendicular
+  // distance from centre to any edge midpoint) = r * cos(π/n).
+  // To achieve a *uniform* ring width `inset` measured edge-to-edge:
+  //   inner_apothem = outer_apothem - inset
+  //   inner_r = outer_r - inset / cos(π/n)
+  // For a circle cos(π/∞)=1, so no correction is needed.
+  const polyR = (n: number): number =>
+    inset === 0 ? outerR : outerR - inset / Math.cos(Math.PI / n);
+
+  const polygon = (sides: number, rotationDeg = 0, r = outerR - inset): string => {
     const pts: string[] = [];
     for (let i = 0; i < sides; i++) {
       const angle =
@@ -1224,7 +1261,7 @@ function buildWrapperShapePath(
     return `M ${pts.join(" L ")} Z`;
   };
 
-  const star = (points: number, innerRatio: number): string => {
+  const star = (points: number, innerRatio: number, r = outerR - inset): string => {
     const pts: string[] = [];
     for (let i = 0; i < points * 2; i++) {
       const angle = (i * Math.PI) / points - Math.PI / 2;
@@ -1237,28 +1274,33 @@ function buildWrapperShapePath(
   };
 
   switch (shape) {
-    case "circle":
+    case "circle": {
+      const r = outerR - inset;
       return (
         `M ${(cx - r).toFixed(3)} ${cy.toFixed(3)} ` +
         `A ${r.toFixed(3)} ${r.toFixed(3)} 0 1 0 ${(cx + r).toFixed(3)} ${cy.toFixed(3)} ` +
         `A ${r.toFixed(3)} ${r.toFixed(3)} 0 1 0 ${(cx - r).toFixed(3)} ${cy.toFixed(3)} Z`
       );
-    case "square":
+    }
+    case "square": {
+      // Axis-aligned square: apothem = half-side = r — direct inset is uniform.
+      const r = outerR - inset;
       return `M ${(cx - r).toFixed(3)} ${(cy - r).toFixed(3)} H ${(cx + r).toFixed(3)} V ${(cy + r).toFixed(3)} H ${(cx - r).toFixed(3)} Z`;
+    }
     case "triangle":
-      return polygon(3, 0);
+      return polygon(3, 0, polyR(3));
     case "diamond":
-      return polygon(4, 45);
+      return polygon(4, 45, polyR(4));
     case "pentagon":
-      return polygon(5, 0);
+      return polygon(5, 0, polyR(5));
     case "hexagon":
-      return polygon(6, 0);
+      return polygon(6, 0, polyR(6));
     case "octagon":
-      return polygon(8, 22.5);
+      return polygon(8, 22.5, polyR(8));
     case "star":
-      return star(5, 0.45);
+      return star(5, 0.45, polyR(5));
     case "star4":
-      return star(4, 0.38);
+      return star(4, 0.38, polyR(4));
     default:
       return polygon(4, 0);
   }
@@ -1377,7 +1419,7 @@ function buildAnimations(
         wrap = (s) => (s ? `<g opacity="${op.toFixed(4)}">${s}</g>` : s);
       } else {
         const tag = `<animate attributeName="opacity" values="${vTo};${vFrom};${vTo}" dur="${dur}s" begin="${delay}s" repeatCount="${rc}"/>`;
-        wrap = (s) => (s ? `<g>${tag}${s}</g>` : s);
+        wrap = (s) => (s ? `<g style="will-change:opacity">${tag}${s}</g>` : s);
       }
       if (target === "eyes" || target === "all") wrapEyes = wrap;
       if (target === "dots" || target === "all") wrapDots = wrap;
@@ -1446,7 +1488,7 @@ function buildAnimations(
           defs += `<clipPath id="${cid}"><rect x="0" y="${fullSize}" width="${fullSize}" height="0"><animate attributeName="y" from="${fullSize}" to="0" dur="${dur}s" fill="freeze" begin="${delay}s"/><animate attributeName="height" from="0" to="${fullSize}" dur="${dur}s" fill="freeze" begin="${delay}s"/></rect></clipPath>`;
       }
       const prev = wrapContent;
-      wrapContent = (s) => prev(`<g clip-path="url(#${cid})">${s}</g>`);
+      wrapContent = (s) => prev(`<g style="will-change:clip-path" clip-path="url(#${cid})">${s}</g>`);
     } else if (anim.type === "glow") {
       const dur = anim.duration ?? 2;
       const glowColor = anim.color ?? dotColor;
@@ -1473,8 +1515,8 @@ function buildAnimations(
       }
       const prevD = wrapDots,
         prevE = wrapEyes;
-      wrapDots = (s) => prevD(`<g filter="url(#${fid})">${s}</g>`);
-      wrapEyes = (s) => prevE(`<g filter="url(#${fid})">${s}</g>`);
+      wrapDots = (s) => prevD(`<g style="will-change:filter" filter="url(#${fid})">${s}</g>`);
+      wrapEyes = (s) => prevE(`<g style="will-change:filter" filter="url(#${fid})">${s}</g>`);
     } else if (anim.type === "color-cycle") {
       // Animated hueRotate — pure hue shift, luminance unchanged → all frames scannable.
       const dur = anim.duration ?? 4;
@@ -1494,7 +1536,7 @@ function buildAnimations(
         </filter>`;
       }
       const wrap: AnimWrap = (s) =>
-        s ? `<g filter="url(#${fid})">${s}</g>` : s;
+        s ? `<g style="will-change:filter" filter="url(#${fid})">${s}</g>` : s;
       if (target === "dots" || target === "all") {
         const p = wrapDots;
         wrapDots = (s) => p(wrap(s));
@@ -1599,7 +1641,7 @@ function buildAnimations(
         const prev = wrapContent;
         wrapContent = (s) =>
           prev(
-            `<g><animateTransform attributeName="transform" type="translate" values="${vals}" dur="${dur}s" repeatCount="${rc}" begin="${delay}s" calcMode="spline" keySplines="${Array(kfCount).fill("0.45 0 0.55 1").join(";")}"/>${s}</g>`,
+            `<g style="will-change:transform"><animateTransform attributeName="transform" type="translate" values="${vals}" dur="${dur}s" repeatCount="${rc}" begin="${delay}s" calcMode="spline" keySplines="${Array(kfCount).fill("0.45 0 0.55 1").join(";")}"/>${s}</g>`,
           );
       }
     }
@@ -1887,6 +1929,40 @@ function buildEffects(
         break;
       }
 
+      case "convex": {
+        // feDiffuseLighting on a blurred alpha bump map → each dot appears as a
+        // raised dome. "screen" blend adds the lighting only to dot bodies, leaving
+        // the white background untouched.
+        const az = fx.azimuth ?? 225;
+        const el = fx.elevation ?? 45;
+        const surface = fx.surfaceScale ?? 5;
+        const str = fx.strength ?? 1.2;
+        const lcolor = fx.lightColor ?? "white";
+        defs += `<filter id="${fid}" x="-5%" y="-5%" width="110%" height="110%" color-interpolation-filters="sRGB">
+          <feGaussianBlur in="SourceAlpha" stdDeviation="1.0" result="bump"/>
+          <feDiffuseLighting in="bump" surfaceScale="${surface}" diffuseConstant="${str.toFixed(3)}" lighting-color="${lcolor}" result="diffuse">
+            <feDistantLight azimuth="${az}" elevation="${el}"/>
+          </feDiffuseLighting>
+          <feComposite in="diffuse" in2="SourceAlpha" operator="in" result="diffuseMasked"/>
+          <feBlend in="SourceGraphic" in2="diffuseMasked" mode="screen"/>
+        </filter>`;
+        const wrap: AnimWrap = (s) =>
+          s ? `<g filter="url(#${fid})">${s}</g>` : s;
+        if (isAll) {
+          const p = wrapAll;
+          wrapAll = (s) => p(wrap(s));
+        }
+        if (toDots) {
+          const p = wrapDots;
+          wrapDots = (s) => p(wrap(s));
+        }
+        if (toEyes) {
+          const p = wrapEyes;
+          wrapEyes = (s) => p(wrap(s));
+        }
+        break;
+      }
+
       case "color-split": {
         // Separate R and B channels by ±offset, G stays centered.
         // Creates colorful fringing at dot edges; dot bodies stay dark.
@@ -1964,17 +2040,8 @@ export async function QRCodeGenerate(
     config.borderRadius != null
       ? Math.max(0, Math.min(100, config.borderRadius))
       : 0;
-  // Circle wrapper needs the same safe-margin guarantee as borderRadius: 100
-  const _brForMargin =
-    config.wrapper?.shape === "circle" || config.wrapper?.shape == null
-      ? config.wrapper
-        ? 100
-        : clampedBorderRadius
-      : clampedBorderRadius;
-  const _c = 1 - 1 / Math.SQRT2; // ≈ 0.2929
-  const _k = (_brForMargin / 100) * _c;
-  const minSafeMargin =
-    _k > 0 && _k < 1 ? (_k * matrixSize) / (2 * (1 - _k)) : 0;
+  const _c = _wrapperSafeC(config.wrapper, clampedBorderRadius);
+  const minSafeMargin = _c > 0 && _c < 1 ? (_c * matrixSize) / (2 * (1 - _c)) : 0;
   const effectiveMargin = Math.max(margin, minSafeMargin);
 
   // Pre-build bounds (returned alongside svg)
@@ -2257,48 +2324,73 @@ export async function QRCodeGenerate(
   }
 
   // --- 2b. MARGIN FILL DOTS ---
-  // When a wrapper is active and fillMargin !== false, flood the margin area
-  // (grid positions outside the QR matrix but inside fullSize) with dots that
-  // share the same shape, color and gradient as dotsOptions.
-  // These dots are appended to pathsD.dots / uses.dots so they participate in
-  // the same gradient mask as the QR data dots.
+  // When a wrapper is active and fillMargin is not false, flood the margin area
+  // (grid positions outside the QR matrix but inside fullSize) with dots.
+  //
+  // • fillMargin === true (or omitted) → merge into pathsD.dots / uses.dots so
+  //   the margin dots share the same gradient mask as the QR data dots.
+  // • fillMargin is a QrWrapperFillMargin object → collect into separate buffers
+  //   (marginFillPathD / marginFillUses) and render as a standalone SVG layer
+  //   with its own color, gradient, opacity, scale, density and shape.
+
+  // Separate-layer buffers (used only when fillMargin is an object)
+  let marginFillPathD = "";
+  let marginFillUses = "";
+
   if (config.wrapper && config.wrapper.fillMargin !== false) {
-    const dotsShapeType = config.dotsOptions.shape?.type ?? "figure";
-    const dotsShapePath = ((config.dotsOptions.shape as any)?.path ??
-      "square") as string;
-    const dotsScale = config.dotsOptions.scale ?? 1;
+    const fm = config.wrapper.fillMargin;
+    const isFmObj = fm !== null && typeof fm === "object";
+
+    // Resolve shape/scale to use for margin fill
+    const fmShape: import("./types").QrShape | undefined = isFmObj
+      ? (fm as import("./types").QrWrapperFillMargin).shape ?? config.dotsOptions.shape
+      : config.dotsOptions.shape;
+    const fmScale = isFmObj
+      ? ((fm as import("./types").QrWrapperFillMargin).scale ?? config.dotsOptions.scale ?? 1)
+      : (config.dotsOptions.scale ?? 1);
+    const fmDensity = isFmObj
+      ? ((fm as import("./types").QrWrapperFillMargin).density ?? 1)
+      : 1;
+
+    const fmShapeType = fmShape?.type ?? "figure";
+    const fmShapePath = ((fmShape as any)?.path ?? "square") as string;
     const noNeighbors: Neighbors = { t: false, r: false, b: false, l: false };
 
-    // Extend grid by one extra column/row on each side to ensure full coverage
-    // near the edges (fractional effectiveMargin values).
+    // Deterministic density hash — returns 0..1 for position (mx, my)
+    const hashPos = (mx: number, my: number): number => {
+      let h = (((mx * 2654435761) ^ (my * 2246822519)) >>> 0);
+      h = (((h ^ (h >>> 16)) * 0x45d9f3b) >>> 0);
+      return (h >>> 0) / 0x100000000;
+    };
+
     const ext = Math.ceil(effectiveMargin) + 1;
 
     for (let my = -ext; my < matrixSize + ext; my++) {
       for (let mx = -ext; mx < matrixSize + ext; mx++) {
-        // Skip positions that belong to the QR matrix itself
         if (mx >= 0 && mx < matrixSize && my >= 0 && my < matrixSize) continue;
 
-        // Pixel-space top-left corner of this module
+        if (fmDensity < 1 && hashPos(mx, my) >= fmDensity) continue;
+
         const px = mx + effectiveMargin;
         const py = my + effectiveMargin;
 
-        // Reject positions fully outside the SVG canvas
         if (px >= fullSize || py >= fullSize || px + 1 <= 0 || py + 1 <= 0)
           continue;
 
+        const targetPathD = isFmObj ? { get: () => marginFillPathD, set: (v: string) => { marginFillPathD = v; } } : { get: () => pathsD.dots, set: (v: string) => { pathsD.dots = v; } };
+        const targetUses = isFmObj ? { get: () => marginFillUses, set: (v: string) => { marginFillUses = v; } } : { get: () => uses.dots, set: (v: string) => { uses.dots = v; } };
+
         if (
-          dotsShapeType === "icon" ||
-          dotsShapeType === "custom-icon" ||
-          dotsShapeType === "image-icon"
+          fmShapeType === "icon" ||
+          fmShapeType === "custom-icon" ||
+          fmShapeType === "image-icon"
         ) {
-          const scaled = dotsScale;
-          const offX = (1 - scaled) / 2;
-          const offY = (1 - scaled) / 2;
-          uses.dots += `<use href="#icon-dots" x="${px + offX}" y="${py + offY}" width="${scaled}" height="${scaled}" />`;
+          const offX = (1 - fmScale) / 2;
+          const offY = (1 - fmScale) / 2;
+          targetUses.set(targetUses.get() + `<use href="#icon-dots" x="${px + offX}" y="${py + offY}" width="${fmScale}" height="${fmScale}" />`);
         } else {
-          const drawer =
-            neighborShapes[dotsShapePath] ?? neighborShapes["square"];
-          pathsD.dots += drawer(px, py, noNeighbors, dotsScale);
+          const drawer = neighborShapes[fmShapePath] ?? neighborShapes["square"];
+          targetPathD.set(targetPathD.get() + drawer(px, py, noNeighbors, fmScale));
         }
       }
     }
@@ -2316,26 +2408,60 @@ export async function QRCodeGenerate(
       (hasUses ? uses.dots : "") +
       (hasPaths ? `<path d="${pathsD.dots}" />` : "");
 
-    const maskDef = `<mask id="mask-dots">
+    // Push mask into root defs — browsers can pre-parse all defs before
+    // rendering, avoiding a second pass for inline <mask> elements.
+    defsString += `<mask id="mask-dots">
             <rect width="${fullSize}" height="${fullSize}" fill="black" />
             <g fill="white">${maskContent}</g>
         </mask>`;
 
     if (dotsOverlayRefs.length) {
-      const rects = dotsOverlayRefs
+      return dotsOverlayRefs
         .map((ref, i) => {
           const op = config.dotsOptions.overlays![i].opacity;
           const opAttr = op !== undefined ? ` opacity="${op}"` : "";
           return `<rect width="${fullSize}" height="${fullSize}" fill="${ref}" mask="url(#mask-dots)"${opAttr}/>`;
         })
         .join("");
-      return `${maskDef}${rects}`;
     }
 
-    return `${maskDef}<rect width="${fullSize}" height="${fullSize}" fill="#000000" mask="url(#mask-dots)"/>`;
+    return `<rect width="${fullSize}" height="${fullSize}" fill="#000000" mask="url(#mask-dots)"/>`;
   };
 
-  // Eyes Layer — combines icon <use> elements and figure <path> data
+  // Margin Fill Layer — rendered only when fillMargin is a QrWrapperFillMargin object.
+  // Uses a separate mask/gradient so the margin dots can have independent styling.
+  const generateMarginFillLayer = (): string => {
+    const hasUses = !!marginFillUses;
+    const hasPaths = !!marginFillPathD;
+    if (!hasUses && !hasPaths) return "";
+
+    const fm = config.wrapper!.fillMargin as import("./types").QrWrapperFillMargin;
+    const opacity = fm.opacity ?? 1;
+    const opAttr = opacity !== 1 ? ` opacity="${opacity}"` : "";
+
+    let fillRef: string;
+    if (fm.gradient) {
+      defsString += generateGradientDef("grad-margin-fill", fm.gradient, 0, 0, fullSize, fullSize);
+      fillRef = "url(#grad-margin-fill)";
+    } else {
+      fillRef = fm.color ?? _dotColor(config);
+    }
+
+    const maskContent =
+      (hasUses ? marginFillUses : "") +
+      (hasPaths ? `<path d="${marginFillPathD}" />` : "");
+
+    defsString += `<mask id="mask-margin-fill">
+            <rect width="${fullSize}" height="${fullSize}" fill="black" />
+            <g fill="white">${maskContent}</g>
+        </mask>`;
+
+    return `<rect width="${fullSize}" height="${fullSize}" fill="${fillRef}" mask="url(#mask-margin-fill)"${opAttr}/>`;
+  };
+
+  // Eyes Layer — combines icon <use> elements and figure <path> data.
+  // Mask defs are pushed into the root defsString to avoid nested <defs> in
+  // the SVG body (non-standard and forces extra DOM parsing per eye layer).
   const generateEyeLayer = (
     key: "cornerSquare" | "cornerDot",
     partConfig: QrPartOptions,
@@ -2349,12 +2475,12 @@ export async function QRCodeGenerate(
       (hasUses ? uses[key] : "") +
       (hasPaths ? `<path d="${pathsD[key]}" />` : "");
 
-    const maskDef = `
+    // Push mask into root defs instead of inlining a nested <defs> block.
+    defsString += `
         <mask id="${maskId}">
             <rect width="${fullSize}" height="${fullSize}" fill="black" />
             <g fill="white">${maskContent}</g>
-        </mask>
-      `;
+        </mask>`;
 
     const overlayRefs =
       key === "cornerSquare" ? squareOverlayRefs : dotOverlayRefs;
@@ -2373,7 +2499,7 @@ export async function QRCodeGenerate(
         rects += `<rect x="${eye.x}" y="${eye.y}" width="${eyeFrameSize}" height="${eyeFrameSize}" fill="#000000" mask="url(#${maskId})" />`;
       });
     }
-    return `<defs>${maskDef}</defs>${rects}`;
+    return rects;
   };
 
   // Background Fill Logic (Color OR Gradient)
@@ -2523,6 +2649,7 @@ export async function QRCodeGenerate(
 
   // Build layers: effects applied first (inner), animations wrap on top (outer)
   const dotsLayer = animWrapDots(fxWrapDots(generateDotsLayer()));
+  const marginFillLayer = generateMarginFillLayer();
   const eyesLayer = animWrapEyes(
     fxWrapEyes(
       generateEyeLayer("cornerSquare", config.cornersSquareOptions) +
@@ -2550,6 +2677,7 @@ export async function QRCodeGenerate(
       ${bgMinContrast}
       ${decorationsSvg}
       ${dotsLayer}
+      ${marginFillLayer}
       ${eyesLayer}
       ${imagesSvg}
       ${fxOverlay}

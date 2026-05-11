@@ -10,6 +10,8 @@ import {
   QrDecorationPlacement,
   QrEffect,
   QrAnimation,
+  QrWrapperShape,
+  QrWrapperFillMargin,
 } from "./types";
 
 /**
@@ -84,8 +86,29 @@ export type RandomizeTuning = {
     embossChance?: number;
     /** Chance of adding RGB chromatic aberration (0–1, default 0.18) */
     colorSplitChance?: number;
+    /** Chance of adding a convex / dome 3-D lighting effect (0–1, default 0.20) */
+    convexChance?: number;
     /** Max total effects to stack (default 3) */
     maxEffects?: number;
+  };
+
+  /** Wrapper shape generation tuning. */
+  wrapper?: {
+    /** Chance of adding a wrapper shape at all (0–1, default 0.35) */
+    chance?: number;
+    /** Shape pool to pick from. Default: all wrapper shapes */
+    shapes?: QrWrapperShape[];
+    /** Chance of adding a stroke ring (0–1, default 0.65) */
+    strokeChance?: number;
+    /** Chance of using a gradient stroke instead of solid (0–1, default 0.45) */
+    strokeGradientChance?: number;
+    /** Stroke width range [min, max] in SVG output units. Default [4, 14] */
+    strokeWidthRange?: [number, number];
+    /**
+     * Chance that fillMargin is rendered as a `QrWrapperFillMargin` object
+     * (custom color/density/opacity) instead of plain `true`. Default 0.45.
+     */
+    fillMarginObjectChance?: number;
   };
 
   /** Animation generation tuning. */
@@ -169,6 +192,8 @@ export type RandomizeConfig = {
   effects?: boolean;
   /** Randomize SVG animations (pulse, shimmer, draw, glow) */
   animation?: boolean;
+  /** Randomize the wrapper shape, stroke ring and fillMargin decoration */
+  wrapper?: boolean;
 
   /** @deprecated Use `dotsOverlays` instead */
   dotsPattern?: boolean;
@@ -285,6 +310,14 @@ type RT = {
   fxDuotone: number;
   fxEmboss: number;
   fxColorSplit: number;
+  fxConvex: number;
+  // wrapper
+  wrapperChance: number;
+  wrapperShapes: QrWrapperShape[];
+  wrapperStrokeChance: number;
+  wrapperStrokeGradChance: number;
+  wrapperStrokeWidthRange: [number, number];
+  wrapperFillMarginObjChance: number;
   // animations
   anPulse: number;
   anShimmer: number;
@@ -344,6 +377,16 @@ function resolveT(t?: RandomizeTuning): RT {
     fxDuotone: e?.duotoneChance ?? 0.15,
     fxEmboss: e?.embossChance ?? 0.2,
     fxColorSplit: e?.colorSplitChance ?? 0.18,
+    fxConvex: e?.convexChance ?? 0.2,
+    wrapperChance: t?.wrapper?.chance ?? 0.35,
+    wrapperShapes: t?.wrapper?.shapes ?? [
+      "circle", "hexagon", "octagon", "pentagon",
+      "diamond", "star", "star4", "triangle",
+    ],
+    wrapperStrokeChance: t?.wrapper?.strokeChance ?? 0.65,
+    wrapperStrokeGradChance: t?.wrapper?.strokeGradientChance ?? 0.45,
+    wrapperStrokeWidthRange: t?.wrapper?.strokeWidthRange ?? [4, 14],
+    wrapperFillMarginObjChance: t?.wrapper?.fillMarginObjectChance ?? 0.45,
     anPulse: a?.pulseChance ?? 0.3,
     anShimmer: a?.shimmerChance ?? 0.3,
     anDraw: a?.drawChance ?? 0.2,
@@ -595,7 +638,58 @@ function makeGen(tc: RT) {
         direction: rng() < 0.5 ? "horizontal" : "vertical",
       });
     }
+    if (rng() < tc.fxConvex && out.length < tc.fxMax) {
+      const AZIMUTHS = [0, 45, 90, 135, 180, 225, 270, 315] as const;
+      out.push({
+        type: "convex",
+        target: pick(["dots", "all"] as const, rng),
+        azimuth: pick(AZIMUTHS, rng),
+        elevation: 30 + rng() * 40,
+        surfaceScale: 3 + rng() * 5,
+        strength: 0.8 + rng() * 0.7,
+        ...(rng() < 0.4 ? { lightColor: randomColor(rng) } : {}),
+      });
+    }
     return out;
+  }
+
+  function randomWrapper(
+    rng: () => number,
+    isDark: boolean,
+    dotsColorFn: (rng: () => number) => string,
+  ): NonNullable<Options["wrapper"]> | null {
+    if (rng() >= tc.wrapperChance) return null;
+
+    const shape = pick(tc.wrapperShapes, rng);
+    const hasStroke = rng() < tc.wrapperStrokeChance;
+    const [swMin, swMax] = tc.wrapperStrokeWidthRange;
+    const strokeWidth = hasStroke
+      ? Math.round(swMin + rng() * (swMax - swMin))
+      : 0;
+
+    let stroke: string | undefined;
+    let strokeGradient: Gradient | undefined;
+    if (hasStroke) {
+      if (rng() < tc.wrapperStrokeGradChance) {
+        strokeGradient = grad(dotsColorFn, rng);
+      } else {
+        stroke = dotsColorFn(rng);
+      }
+    }
+
+    // fillMargin: object or plain true
+    let fillMargin: boolean | QrWrapperFillMargin = true;
+    if (rng() < tc.wrapperFillMarginObjChance) {
+      const fmColor = dotsColorFn(rng);
+      fillMargin = {
+        color: fmColor,
+        opacity: 0.2 + rng() * 0.45,
+        density: 0.35 + rng() * 0.55,
+        ...(rng() < 0.3 ? { scale: 0.4 + rng() * 0.5 } : {}),
+      } satisfies QrWrapperFillMargin;
+    }
+
+    return { shape, strokeWidth, stroke, strokeGradient, fillMargin };
   }
 
   function randomAnimations(rng: () => number): QrAnimation[] {
@@ -690,6 +784,8 @@ function makeGen(tc: RT) {
     randomEffects: (rng: () => number, isDark: boolean) =>
       randomEffects(rng, isDark),
     randomAnimations,
+    randomWrapper: (rng: () => number, isDark: boolean) =>
+      randomWrapper(rng, isDark, isDark ? vividC : darkC),
     dotShape: (rng: () => number) =>
       rng() < tc.dotIconChance
         ? { type: "icon" as const, path: pick(tc.dotIcons, rng) as string }
@@ -857,6 +953,12 @@ export function randomizeOptions(
   if (config.animation) {
     const anims = gen.randomAnimations(rng);
     if (anims.length > 0) result.animation = anims;
+  }
+
+  // --- wrapper ---
+  if (config.wrapper) {
+    const w = gen.randomWrapper(rng, isDark);
+    if (w) result.wrapper = w;
   }
 
   // --- background guarantee ---

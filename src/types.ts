@@ -380,6 +380,33 @@ export type QrEffectColorSplit = QrEffectBase & {
   direction?: "horizontal" | "vertical";
 };
 
+/**
+ * 3-D convex / dome effect — `feDiffuseLighting` with a `feDistantLight` makes
+ * each dot look like a raised button or dome: the lit face brightens, the
+ * shadowed face darkens. Unlike `emboss` (specular only), this produces a
+ * soft, matte, rounded appearance across the full dot surface.
+ */
+export type QrEffectConvex = QrEffectBase & {
+  type: "convex";
+  /**
+   * Light azimuth in degrees: 0 = right, 90 = bottom, 180 = left, 270 = top.
+   * Default 225 (top-left — classic lighting direction).
+   */
+  azimuth?: number;
+  /**
+   * Light elevation above the surface plane in degrees.
+   * 0 = grazing light (flat), 90 = directly overhead (minimal shadow).
+   * Default 45.
+   */
+  elevation?: number;
+  /** Apparent height of the dome — higher values = more pronounced 3-D relief. Default 5. */
+  surfaceScale?: number;
+  /** Diffuse light intensity 0–2. Values above 1 over-brighten the lit face. Default 1.2. */
+  strength?: number;
+  /** Light color (default `"white"`). Tint to add a colored sheen. */
+  lightColor?: string;
+};
+
 export type QrEffect =
   | QrEffectDropShadow
   | QrEffectNeonGlow
@@ -389,7 +416,8 @@ export type QrEffect =
   | QrEffectNoise
   | QrEffectDuotone
   | QrEffectEmboss
-  | QrEffectColorSplit;
+  | QrEffectColorSplit
+  | QrEffectConvex;
 
 // ---------------------------------------------------------------------------
 // Animation
@@ -757,13 +785,57 @@ export type QrWrapper = {
    */
   strokeWidth?: number;
   /**
-   * When `true` (default), the margin area around the QR matrix is filled with
-   * decorative dots that share the same shape, color and gradient as `dotsOptions`.
-   * This creates an integrated design element — the shape is not just a clip/frame
-   * on top of the QR code, but a fully filled pattern.
-   * Set to `false` to use the wrapper as a plain clip with no margin fill.
+   * Controls the decorative dots that fill the margin area inside the wrapper shape.
+   *
+   * - `true` (default) — margin dots inherit the same shape, color and gradient
+   *   as `dotsOptions`, merged into the same SVG layer.
+   * - `false` — no margin fill; wrapper acts as a plain clip/frame.
+   * - `QrWrapperFillMargin` object — margin dots are rendered as a **separate**
+   *   SVG layer with independent color, gradient, opacity, scale, density and shape.
    */
-  fillMargin?: boolean;
+  fillMargin?: boolean | QrWrapperFillMargin;
+};
+
+/**
+ * Fine-grained control over the decorative dots that fill the wrapper margin area.
+ * Use this as `wrapper.fillMargin` when you want the margin dots to look different
+ * from the QR data dots (different color, lower density, alternative shape, etc.).
+ *
+ * @example Sparse semi-transparent rings in the margin
+ * ```ts
+ * wrapper: {
+ *   shape: "hexagon",
+ *   fillMargin: {
+ *     color: "#4488ff",
+ *     opacity: 0.4,
+ *     density: 0.6,
+ *     shape: { type: "figure", path: "dots" },
+ *   },
+ * }
+ * ```
+ */
+export type QrWrapperFillMargin = {
+  /** Solid fill color for margin dots. Default: inherits `dotsOptions` color. */
+  color?: string;
+  /** Gradient fill for margin dots. Takes priority over `color`. */
+  gradient?: Gradient;
+  /** Dot opacity 0–1 (default 1). */
+  opacity?: number;
+  /**
+   * Dot scale factor 0.1–1.0.
+   * Default: inherits `dotsOptions.scale` (usually 1.0).
+   */
+  scale?: number;
+  /**
+   * Fraction of margin positions that receive a dot: 0 = none, 1 = all (default).
+   * Filtering is deterministic (position hash), so the result is reproducible.
+   */
+  density?: number;
+  /**
+   * Dot shape for margin fill.
+   * Default: inherits `dotsOptions.shape`.
+   */
+  shape?: QrShape;
 };
 
 // The Main Config

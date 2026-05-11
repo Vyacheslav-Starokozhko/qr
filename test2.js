@@ -43,7 +43,7 @@ const bg1Img = fileToDataURI("assets/bg/bg1.jpg");
     height: 362,
     data: "https://t-dev.consumer.games/69fe4ab37ebdb4d249c14f7a",
     margin: 5,
-    backgroundEnable: false,
+    backgroundEnable: true,
     imageEnable: false,
     qrOptions: {
       typeNumber: 0,
