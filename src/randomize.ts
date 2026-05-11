@@ -109,6 +109,18 @@ export type RandomizeTuning = {
      * (custom color/density/opacity) instead of plain `true`. Default 0.45.
      */
     fillMarginObjectChance?: number;
+    /**
+     * Maximum number of effects allowed when a wrapper is active.
+     * Wrapper shapes clip the QR — stacking many effects on a small area
+     * typically looks bad and is harder to scan. Default 1.
+     */
+    maxEffects?: number;
+    /**
+     * When `true` (default), color-split, liquid and morphology-dilate effects
+     * are suppressed when a wrapper is active — they interact poorly with
+     * tightly clipped QR areas.
+     */
+    safeEffectsOnly?: boolean;
   };
 
   /** Animation generation tuning. */
@@ -318,6 +330,8 @@ type RT = {
   wrapperStrokeGradChance: number;
   wrapperStrokeWidthRange: [number, number];
   wrapperFillMarginObjChance: number;
+  wrapperMaxEffects: number;
+  wrapperSafeEffects: boolean;
   // animations
   anPulse: number;
   anShimmer: number;
@@ -379,14 +393,17 @@ function resolveT(t?: RandomizeTuning): RT {
     fxColorSplit: e?.colorSplitChance ?? 0.18,
     fxConvex: e?.convexChance ?? 0.2,
     wrapperChance: t?.wrapper?.chance ?? 0.35,
+    // triangle and star4 clip very aggressively — excluded from the default pool.
+    // Include them explicitly via tuning.shapes if needed.
     wrapperShapes: t?.wrapper?.shapes ?? [
-      "circle", "hexagon", "octagon", "pentagon",
-      "diamond", "star", "star4", "triangle",
+      "circle", "hexagon", "octagon", "pentagon", "diamond", "star",
     ],
     wrapperStrokeChance: t?.wrapper?.strokeChance ?? 0.65,
     wrapperStrokeGradChance: t?.wrapper?.strokeGradientChance ?? 0.45,
     wrapperStrokeWidthRange: t?.wrapper?.strokeWidthRange ?? [4, 14],
     wrapperFillMarginObjChance: t?.wrapper?.fillMarginObjectChance ?? 0.45,
+    wrapperMaxEffects: t?.wrapper?.maxEffects ?? 1,
+    wrapperSafeEffects: t?.wrapper?.safeEffectsOnly ?? true,
     anPulse: a?.pulseChance ?? 0.3,
     anShimmer: a?.shimmerChance ?? 0.3,
     anDraw: a?.drawChance ?? 0.2,
@@ -951,6 +968,28 @@ export function randomizeOptions(
   if (config.wrapper) {
     const w = gen.randomWrapper(rng, isDark);
     if (w) result.wrapper = w;
+  }
+
+  // --- wrapper × effects guard ---
+  // When a wrapper clips the QR to a smaller area, heavy effects look bad and
+  // reduce scanability. Cap the effect count and strip incompatible types.
+  if (result.wrapper && result.effects?.length) {
+    let fx = result.effects;
+
+    if (tc.wrapperSafeEffects) {
+      // color-split creates fringing that reads as noise inside a clipped area.
+      // liquid and morphology-dilate can merge modules that are already close
+      // to the clip boundary, making finder patterns unrecognisable.
+      fx = fx.filter((e) => {
+        if (e.type === "color-split") return false;
+        if (e.type === "liquid") return false;
+        if (e.type === "morphology" && (e as any).operator !== "erode") return false;
+        return true;
+      });
+    }
+
+    fx = fx.slice(0, tc.wrapperMaxEffects);
+    result.effects = fx.length > 0 ? fx : undefined;
   }
 
   // --- background guarantee ---
