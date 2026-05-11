@@ -660,14 +660,13 @@ export type QrDecorationBuiltinShape =
   | "square"
   | "diamond"
   | "star"
-  | "star4"
   | "cross"
   | "triangle";
 
 /**
  * Shape of a decoration element.
  *
- * - String shortcuts: "dot" | "ring" | "square" | "diamond" | "star" | "star4" | "cross" | "triangle"
+ * - String shortcuts: "dot" | "ring" | "square" | "diamond" | "star" | "cross" | "triangle"
  * - `{ type: "icon"; path }` — one of the built-in icon shapes (same keys used for QR dots)
  * - `{ type: "custom-path"; d; viewBox? }` — your own SVG path data
  * - `{ type: "image"; source }` — any image URL or base64 data-URI (PNG, SVG, …)
@@ -714,7 +713,6 @@ export type QrDecoration = {
  * - "hexagon"  – regular 6-sided polygon (flat-top)
  * - "octagon"  – regular 8-sided polygon
  * - "star"     – 5-pointed star
- * - "star4"    – 4-pointed star
  */
 export type QrWrapperShape =
   | "circle"
@@ -724,8 +722,7 @@ export type QrWrapperShape =
   | "pentagon"
   | "hexagon"
   | "octagon"
-  | "star"
-  | "star4";
+  | "star";
 
 /**
  * Clips the entire QR (background + dots) to a geometric shape and renders a

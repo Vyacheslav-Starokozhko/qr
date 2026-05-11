@@ -248,9 +248,9 @@ function hslToHex(h: number, s: number, l: number): string {
 const DOT_ICON_SHAPES = [
   "dots-square",
   "dots-rounded",
-  "dots-classy",
-  "dots-classy-rounded",
   "dots-extra-rounded",
+  // "dots-classy" / "dots-classy-rounded" excluded: diagonal cuts produce
+  // chaotic noise patterns on dark themes and inside wrapper shapes.
 ] as const;
 
 const DOT_FIGURE_SHAPES = [
@@ -258,9 +258,11 @@ const DOT_FIGURE_SHAPES = [
   "dots",
   "extra-rounded",
   "rounded",
-  "classy",
-  "classy-rounded",
+  // "classy" / "classy-rounded" excluded: same reason as above.
 ] as const;
+
+// Simple shapes safe to use as fill-margin dots (no diagonal cuts).
+const FILL_MARGIN_SHAPES = ["dots", "rounded", "extra-rounded", "square"] as const;
 
 const INNER_EYE_SHAPES = [
   "inner-eye-square",
@@ -393,8 +395,8 @@ function resolveT(t?: RandomizeTuning): RT {
     fxColorSplit: e?.colorSplitChance ?? 0.18,
     fxConvex: e?.convexChance ?? 0.2,
     wrapperChance: t?.wrapper?.chance ?? 0.35,
-    // triangle and star4 clip very aggressively — excluded from the default pool.
-    // Include them explicitly via tuning.shapes if needed.
+    // triangle clips very aggressively — excluded from the default pool.
+    // Include it explicitly via tuning.shapes if needed.
     wrapperShapes: t?.wrapper?.shapes ?? [
       "circle", "hexagon", "octagon", "pentagon", "diamond", "star",
     ],
@@ -686,15 +688,24 @@ function makeGen(tc: RT) {
       }
     }
 
-    // fillMargin: object or plain true
-    let fillMargin: boolean | QrWrapperFillMargin = true;
-    if (rng() < tc.wrapperFillMarginObjChance) {
-      const fmColor = dotsColorFn(rng);
+    // fillMargin: false (25%) | object with simple shape (wrapperFillMarginObjChance) | true
+    // Never let fillMargin inherit a complex dot shape — always pin to a
+    // simple shape from FILL_MARGIN_SHAPES so the border area stays clean.
+    let fillMargin: boolean | QrWrapperFillMargin;
+    if (rng() < 0.25) {
+      fillMargin = false;
+    } else if (rng() < tc.wrapperFillMarginObjChance) {
       fillMargin = {
-        color: fmColor,
+        color: dotsColorFn(rng),
         opacity: 0.2 + rng() * 0.45,
         density: 0.35 + rng() * 0.55,
+        shape: { type: "figure", path: pick(FILL_MARGIN_SHAPES, rng) },
         ...(rng() < 0.3 ? { scale: 0.4 + rng() * 0.5 } : {}),
+      } satisfies QrWrapperFillMargin;
+    } else {
+      // plain true — but override the inherited shape with a safe simple shape
+      fillMargin = {
+        shape: { type: "figure", path: pick(FILL_MARGIN_SHAPES, rng) },
       } satisfies QrWrapperFillMargin;
     }
 
@@ -816,7 +827,6 @@ const DECORATION_SHAPES: QrDecorationBuiltinShape[] = [
   "square",
   "diamond",
   "star",
-  "star4",
   "cross",
   "triangle",
 ];

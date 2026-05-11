@@ -247,15 +247,19 @@ function getEyePositions(matrixSize: number, padding: number) {
 }
 
 function isInnerEyeStart(x: number, y: number, size: number): boolean {
-  return (x === 2 && y === 2) ||
-         (x === size - 5 && y === 2) ||
-         (x === 2 && y === size - 5);
+  return (
+    (x === 2 && y === 2) ||
+    (x === size - 5 && y === 2) ||
+    (x === 2 && y === size - 5)
+  );
 }
 
 function isOuterEyeStart(x: number, y: number, size: number): boolean {
-  return (x === 0 && y === 0) ||
-         (x === size - 7 && y === 0) ||
-         (x === 0 && y === size - 7);
+  return (
+    (x === 0 && y === 0) ||
+    (x === size - 7 && y === 0) ||
+    (x === 0 && y === size - 7)
+  );
 }
 
 // Gradient generator bound to a specific zone (bx, by, bw, bh)
@@ -817,7 +821,8 @@ export async function validateQR(
       ? Math.max(0, Math.min(100, config.borderRadius))
       : 0;
   const _c = _wrapperSafeC(config.wrapper, clampedBR);
-  const minSafeMargin = _c > 0 && _c < 1 ? (_c * matrixSize) / (2 * (1 - _c)) : 0;
+  const minSafeMargin =
+    _c > 0 && _c < 1 ? (_c * matrixSize) / (2 * (1 - _c)) : 0;
   const effectiveMargin = Math.max(margin, minSafeMargin);
 
   const wMatch = svg.match(/\bwidth="([\d.]+)"/);
@@ -974,9 +979,6 @@ function _renderBuiltinDecoration(
     case "star":
       return `<path d="${_starPath(cx, cy, r, r * 0.45, 5)}" ${fill}${op}/>`;
 
-    case "star4":
-      return `<path d="${_starPath(cx, cy, r, r * 0.35, 4)}" ${fill}${op}/>`;
-
     case "cross": {
       const t = r * 0.3;
       const d =
@@ -1004,7 +1006,7 @@ function _renderBuiltinDecoration(
  * to the QR background zone (including being hidden in rounded corners).
  *
  * Shape types supported:
- *  - Built-in strings: "dot" | "ring" | "square" | "diamond" | "star" | "star4" | "cross" | "triangle"
+ *  - Built-in strings: "dot" | "ring" | "square" | "diamond" | "star" | "cross" | "triangle"
  *  - { type: "icon"; path }  — icon from the built-in shapes registry
  *  - { type: "custom-path"; path; viewBox? } — custom SVG path data
  *  - { type: "image"; source } — any image URL or base64 data-URI
@@ -1206,14 +1208,13 @@ function _wrapperSafeC(
     const shape = wrapper.shape ?? "circle";
     if (shape === "square") return 0; // axis-aligned square never clips QR corners
     const safeRadiusFactor: Record<string, number> = {
-      circle:   1.0,
-      octagon:  Math.cos(Math.PI / 8),  // ≈ 0.924
-      hexagon:  Math.cos(Math.PI / 6),  // ≈ 0.866
-      pentagon: Math.cos(Math.PI / 5),  // ≈ 0.809
-      diamond:  Math.cos(Math.PI / 4),  // ≈ 0.707
-      triangle: Math.cos(Math.PI / 3),  // = 0.500
-      star:     0.45,
-      star4:    0.38,
+      circle: 1.0,
+      octagon: Math.cos(Math.PI / 8), // ≈ 0.924
+      hexagon: Math.cos(Math.PI / 6), // ≈ 0.866
+      pentagon: Math.cos(Math.PI / 5), // ≈ 0.809
+      diamond: Math.cos(Math.PI / 4), // ≈ 0.707
+      triangle: Math.cos(Math.PI / 3), // = 0.500
+      star: 0.45,
     };
     const f = safeRadiusFactor[shape] ?? 1.0;
     return 1 - f / Math.SQRT2;
@@ -1243,7 +1244,11 @@ function buildWrapperShapePath(
   const polyR = (n: number): number =>
     inset === 0 ? outerR : outerR - inset / Math.cos(Math.PI / n);
 
-  const polygon = (sides: number, rotationDeg = 0, r = outerR - inset): string => {
+  const polygon = (
+    sides: number,
+    rotationDeg = 0,
+    r = outerR - inset,
+  ): string => {
     const pts: string[] = [];
     for (let i = 0; i < sides; i++) {
       const angle =
@@ -1255,7 +1260,11 @@ function buildWrapperShapePath(
     return `M ${pts.join(" L ")} Z`;
   };
 
-  const star = (points: number, innerRatio: number, r = outerR - inset): string => {
+  const star = (
+    points: number,
+    innerRatio: number,
+    r = outerR - inset,
+  ): string => {
     const pts: string[] = [];
     for (let i = 0; i < points * 2; i++) {
       const angle = (i * Math.PI) / points - Math.PI / 2;
@@ -1293,8 +1302,6 @@ function buildWrapperShapePath(
       return polygon(8, 22.5, polyR(8));
     case "star":
       return star(5, 0.45, polyR(5));
-    case "star4":
-      return star(4, 0.38, polyR(4));
     default:
       return polygon(4, 0);
   }
@@ -1482,7 +1489,10 @@ function buildAnimations(
           defs += `<clipPath id="${cid}"><rect x="0" y="${fullSize}" width="${fullSize}" height="0"><animate attributeName="y" from="${fullSize}" to="0" dur="${dur}s" fill="freeze" begin="${delay}s"/><animate attributeName="height" from="0" to="${fullSize}" dur="${dur}s" fill="freeze" begin="${delay}s"/></rect></clipPath>`;
       }
       const prev = wrapContent;
-      wrapContent = (s) => prev(`<g style="will-change:clip-path" clip-path="url(#${cid})">${s}</g>`);
+      wrapContent = (s) =>
+        prev(
+          `<g style="will-change:clip-path" clip-path="url(#${cid})">${s}</g>`,
+        );
     } else if (anim.type === "glow") {
       const dur = anim.duration ?? 2;
       const glowColor = anim.color ?? dotColor;
@@ -1509,8 +1519,10 @@ function buildAnimations(
       }
       const prevD = wrapDots,
         prevE = wrapEyes;
-      wrapDots = (s) => prevD(`<g style="will-change:filter" filter="url(#${fid})">${s}</g>`);
-      wrapEyes = (s) => prevE(`<g style="will-change:filter" filter="url(#${fid})">${s}</g>`);
+      wrapDots = (s) =>
+        prevD(`<g style="will-change:filter" filter="url(#${fid})">${s}</g>`);
+      wrapEyes = (s) =>
+        prevE(`<g style="will-change:filter" filter="url(#${fid})">${s}</g>`);
     } else if (anim.type === "color-cycle") {
       // Animated hueRotate — pure hue shift, luminance unchanged → all frames scannable.
       const dur = anim.duration ?? 4;
@@ -2035,7 +2047,8 @@ export async function QRCodeGenerate(
       ? Math.max(0, Math.min(100, config.borderRadius))
       : 0;
   const _c = _wrapperSafeC(config.wrapper, clampedBorderRadius);
-  const minSafeMargin = _c > 0 && _c < 1 ? (_c * matrixSize) / (2 * (1 - _c)) : 0;
+  const minSafeMargin =
+    _c > 0 && _c < 1 ? (_c * matrixSize) / (2 * (1 - _c)) : 0;
   const effectiveMargin = Math.max(margin, minSafeMargin);
 
   // Pre-build bounds (returned alongside svg)
@@ -2150,27 +2163,40 @@ export async function QRCodeGenerate(
   // --- 2. DRAW LOOP ---
   // Arrays instead of string +=: V8 can avoid O(n) copying on each append.
   // Joined once when consumed in the layer generators.
-  const usesBuf = { dots: [] as string[], cornerSquare: [] as string[], cornerDot: [] as string[] };
-  const pathBuf = { dots: [] as string[], cornerSquare: [] as string[], cornerDot: [] as string[] };
+  const usesBuf = {
+    dots: [] as string[],
+    cornerSquare: [] as string[],
+    cornerDot: [] as string[],
+  };
+  const pathBuf = {
+    dots: [] as string[],
+    cornerSquare: [] as string[],
+    cornerDot: [] as string[],
+  };
 
   // Pre-resolve shape type, path key, scale and drawer functions once per call
   // instead of re-looking them up on every matrix cell.
   const dotsShapeType = config.dotsOptions.shape?.type ?? "figure";
-  const dotsShapePath = ((config.dotsOptions.shape as any)?.path ?? "square") as string;
+  const dotsShapePath = ((config.dotsOptions.shape as any)?.path ??
+    "square") as string;
   const dotsScale = config.dotsOptions.scale ?? 1;
   const dotsDrawer = neighborShapes[dotsShapePath] ?? neighborShapes["square"];
 
   const sqShapeType = config.cornersSquareOptions.shape?.type ?? "figure";
-  const sqShapePath = ((config.cornersSquareOptions.shape as any)?.path ?? "square") as string;
+  const sqShapePath = ((config.cornersSquareOptions.shape as any)?.path ??
+    "square") as string;
   const sqScale = config.cornersSquareOptions.scale ?? 1;
-  const sqMulti = config.cornersSquareOptions.isSingle === false || sqShapePath === "dots";
+  const sqMulti =
+    config.cornersSquareOptions.isSingle === false || sqShapePath === "dots";
   const sqDrawer = neighborShapes[sqShapePath] ?? neighborShapes["square"];
   const sqSingleDrawer = cornerSquares[sqShapePath] ?? cornerSquares["square"];
 
   const cdShapeType = config.cornersDotOptions.shape?.type ?? "figure";
-  const cdShapePath = ((config.cornersDotOptions.shape as any)?.path ?? "square") as string;
+  const cdShapePath = ((config.cornersDotOptions.shape as any)?.path ??
+    "square") as string;
   const cdScale = config.cornersDotOptions.scale ?? 1;
-  const cdMulti = config.cornersDotOptions.isSingle === false || cdShapePath === "dots";
+  const cdMulti =
+    config.cornersDotOptions.isSingle === false || cdShapePath === "dots";
   const cdDrawer = neighborShapes[cdShapePath] ?? neighborShapes["square"];
   const cdSingleDrawer = cornerDots[cdShapePath] ?? cornerDots["square"];
 
@@ -2215,41 +2241,49 @@ export async function QRCodeGenerate(
       // --- Figure rendering (math paths) ---
       if (zone === "dots") {
         if (dotsShapeType === "figure") {
-          pathBuf.dots.push(dotsDrawer(
-            x + effectiveMargin,
-            y + effectiveMargin,
-            getNeighbors(x, y, matrix, matrixSize),
-            dotsScale,
-          ));
+          pathBuf.dots.push(
+            dotsDrawer(
+              x + effectiveMargin,
+              y + effectiveMargin,
+              getNeighbors(x, y, matrix, matrixSize),
+              dotsScale,
+            ),
+          );
           continue;
         }
         // icon / custom-icon / image-icon
         const sw = dotsScale;
         const off = (1 - sw) / 2;
-        usesBuf.dots.push(`<use href="#icon-dots" x="${x + effectiveMargin + off}" y="${y + effectiveMargin + off}" width="${sw}" height="${sw}" />`);
+        usesBuf.dots.push(
+          `<use href="#icon-dots" x="${x + effectiveMargin + off}" y="${y + effectiveMargin + off}" width="${sw}" height="${sw}" />`,
+        );
         continue;
       }
 
       if (zone === "cornerSquare") {
         if (sqShapeType === "figure") {
           if (sqMulti) {
-            pathBuf.cornerSquare.push(sqDrawer(
-              x + effectiveMargin,
-              y + effectiveMargin,
-              getNeighbors(x, y, matrix, matrixSize),
-              sqScale,
-            ));
+            pathBuf.cornerSquare.push(
+              sqDrawer(
+                x + effectiveMargin,
+                y + effectiveMargin,
+                getNeighbors(x, y, matrix, matrixSize),
+                sqScale,
+              ),
+            );
           } else {
             const origin = getEyeOrigin(x, y, matrixSize);
             if (!origin) continue;
             const eyeKey = `sq-${origin.ex}-${origin.ey}`;
             if (!drawnEyes.has(eyeKey)) {
               drawnEyes.add(eyeKey);
-              pathBuf.cornerSquare.push(sqSingleDrawer(
-                origin.ex + effectiveMargin,
-                origin.ey + effectiveMargin,
-                7,
-              ));
+              pathBuf.cornerSquare.push(
+                sqSingleDrawer(
+                  origin.ex + effectiveMargin,
+                  origin.ey + effectiveMargin,
+                  7,
+                ),
+              );
             }
           }
           continue;
@@ -2267,11 +2301,15 @@ export async function QRCodeGenerate(
           }
           const sw = drawSize * sqScale;
           const off = (drawSize - sw) / 2;
-          usesBuf.cornerSquare.push(`<use href="#icon-sq" x="${x + effectiveMargin + off}" y="${y + effectiveMargin + off}" width="${sw}" height="${sw}" />`);
+          usesBuf.cornerSquare.push(
+            `<use href="#icon-sq" x="${x + effectiveMargin + off}" y="${y + effectiveMargin + off}" width="${sw}" height="${sw}" />`,
+          );
         } else {
           const sw = sqScale;
           const off = (1 - sw) / 2;
-          usesBuf.cornerSquare.push(`<use href="#icon-sq" x="${x + effectiveMargin + off}" y="${y + effectiveMargin + off}" width="${sw}" height="${sw}" />`);
+          usesBuf.cornerSquare.push(
+            `<use href="#icon-sq" x="${x + effectiveMargin + off}" y="${y + effectiveMargin + off}" width="${sw}" height="${sw}" />`,
+          );
         }
         continue;
       }
@@ -2279,23 +2317,27 @@ export async function QRCodeGenerate(
       // cornerDot
       if (cdShapeType === "figure") {
         if (cdMulti) {
-          pathBuf.cornerDot.push(cdDrawer(
-            x + effectiveMargin,
-            y + effectiveMargin,
-            getNeighbors(x, y, matrix, matrixSize),
-            cdScale,
-          ));
+          pathBuf.cornerDot.push(
+            cdDrawer(
+              x + effectiveMargin,
+              y + effectiveMargin,
+              getNeighbors(x, y, matrix, matrixSize),
+              cdScale,
+            ),
+          );
         } else {
           const origin = getEyeOrigin(x, y, matrixSize);
           if (!origin) continue;
           const eyeKey = `dot-${origin.ex}-${origin.ey}`;
           if (!drawnEyes.has(eyeKey)) {
             drawnEyes.add(eyeKey);
-            pathBuf.cornerDot.push(cdSingleDrawer(
-              origin.ex + 2 + effectiveMargin,
-              origin.ey + 2 + effectiveMargin,
-              3,
-            ));
+            pathBuf.cornerDot.push(
+              cdSingleDrawer(
+                origin.ex + 2 + effectiveMargin,
+                origin.ey + 2 + effectiveMargin,
+                3,
+              ),
+            );
           }
         }
         continue;
@@ -2312,11 +2354,15 @@ export async function QRCodeGenerate(
         }
         const sw = drawSize * cdScale;
         const off = (drawSize - sw) / 2;
-        usesBuf.cornerDot.push(`<use href="#icon-dot" x="${x + effectiveMargin + off}" y="${y + effectiveMargin + off}" width="${sw}" height="${sw}" />`);
+        usesBuf.cornerDot.push(
+          `<use href="#icon-dot" x="${x + effectiveMargin + off}" y="${y + effectiveMargin + off}" width="${sw}" height="${sw}" />`,
+        );
       } else {
         const sw = cdScale;
         const off = (1 - sw) / 2;
-        usesBuf.cornerDot.push(`<use href="#icon-dot" x="${x + effectiveMargin + off}" y="${y + effectiveMargin + off}" width="${sw}" height="${sw}" />`);
+        usesBuf.cornerDot.push(
+          `<use href="#icon-dot" x="${x + effectiveMargin + off}" y="${y + effectiveMargin + off}" width="${sw}" height="${sw}" />`,
+        );
       }
     }
   }
@@ -2333,22 +2379,29 @@ export async function QRCodeGenerate(
     const fm = config.wrapper.fillMargin;
     const isFmObj = fm !== null && typeof fm === "object";
 
-    const fmCast = isFmObj ? (fm as import("./types").QrWrapperFillMargin) : null;
+    const fmCast = isFmObj
+      ? (fm as import("./types").QrWrapperFillMargin)
+      : null;
     const fmShape = fmCast?.shape ?? config.dotsOptions.shape;
     const fmScale = fmCast?.scale ?? config.dotsOptions.scale ?? 1;
     const fmDensity = fmCast?.density ?? 1;
 
     const fmShapeType = fmShape?.type ?? "figure";
     const fmShapePath = ((fmShape as any)?.path ?? "square") as string;
-    const fmIsIcon = fmShapeType === "icon" || fmShapeType === "custom-icon" || fmShapeType === "image-icon";
-    const fmDrawer = fmIsIcon ? null : (neighborShapes[fmShapePath] ?? neighborShapes["square"]);
+    const fmIsIcon =
+      fmShapeType === "icon" ||
+      fmShapeType === "custom-icon" ||
+      fmShapeType === "image-icon";
+    const fmDrawer = fmIsIcon
+      ? null
+      : (neighborShapes[fmShapePath] ?? neighborShapes["square"]);
     const fmOffXY = fmIsIcon ? (1 - fmScale) / 2 : 0;
     const noNeighbors: Neighbors = { t: false, r: false, b: false, l: false };
 
     // Deterministic density hash — returns 0..1 for (mx, my)
     const hashPos = (mx: number, my: number): number => {
-      let h = (((mx * 2654435761) ^ (my * 2246822519)) >>> 0);
-      h = (((h ^ (h >>> 16)) * 0x45d9f3b) >>> 0);
+      let h = ((mx * 2654435761) ^ (my * 2246822519)) >>> 0;
+      h = ((h ^ (h >>> 16)) * 0x45d9f3b) >>> 0;
       return (h >>> 0) / 0x100000000;
     };
 
@@ -2363,10 +2416,13 @@ export async function QRCodeGenerate(
 
         const px = mx + effectiveMargin;
         const py = my + effectiveMargin;
-        if (px >= fullSize || py >= fullSize || px + 1 <= 0 || py + 1 <= 0) continue;
+        if (px >= fullSize || py >= fullSize || px + 1 <= 0 || py + 1 <= 0)
+          continue;
 
         if (fmIsIcon) {
-          targetUses.push(`<use href="#icon-dots" x="${px + fmOffXY}" y="${py + fmOffXY}" width="${fmScale}" height="${fmScale}" />`);
+          targetUses.push(
+            `<use href="#icon-dots" x="${px + fmOffXY}" y="${py + fmOffXY}" width="${fmScale}" height="${fmScale}" />`,
+          );
         } else {
           targetPath.push(fmDrawer!(px, py, noNeighbors, fmScale));
         }
@@ -2382,8 +2438,7 @@ export async function QRCodeGenerate(
     const dotPath = pathBuf.dots.join("");
     if (!dotUses && !dotPath) return "";
 
-    const maskContent =
-      dotUses + (dotPath ? `<path d="${dotPath}" />` : "");
+    const maskContent = dotUses + (dotPath ? `<path d="${dotPath}" />` : "");
 
     defsString += `<mask id="mask-dots">
             <rect width="${fullSize}" height="${fullSize}" fill="black" />
@@ -2410,13 +2465,21 @@ export async function QRCodeGenerate(
     const mPath = marginFillPathBuf.join("");
     if (!mUses && !mPath) return "";
 
-    const fm = config.wrapper!.fillMargin as import("./types").QrWrapperFillMargin;
+    const fm = config.wrapper!
+      .fillMargin as import("./types").QrWrapperFillMargin;
     const opacity = fm.opacity ?? 1;
     const opAttr = opacity !== 1 ? ` opacity="${opacity}"` : "";
 
     let fillRef: string;
     if (fm.gradient) {
-      defsString += generateGradientDef("grad-margin-fill", fm.gradient, 0, 0, fullSize, fullSize);
+      defsString += generateGradientDef(
+        "grad-margin-fill",
+        fm.gradient,
+        0,
+        0,
+        fullSize,
+        fullSize,
+      );
       fillRef = "url(#grad-margin-fill)";
     } else {
       fillRef = fm.color ?? _dotColor(config);
