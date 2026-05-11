@@ -247,21 +247,15 @@ function getEyePositions(matrixSize: number, padding: number) {
 }
 
 function isInnerEyeStart(x: number, y: number, size: number): boolean {
-  const positions = [
-    { x: 2, y: 2 },
-    { x: size - 7 + 2, y: 2 },
-    { x: 2, y: size - 7 + 2 },
-  ];
-  return positions.some((p) => p.x === x && p.y === y);
+  return (x === 2 && y === 2) ||
+         (x === size - 5 && y === 2) ||
+         (x === 2 && y === size - 5);
 }
 
 function isOuterEyeStart(x: number, y: number, size: number): boolean {
-  const positions = [
-    { x: 0, y: 0 },
-    { x: size - 7, y: 0 },
-    { x: 0, y: size - 7 },
-  ];
-  return positions.some((p) => p.x === x && p.y === y);
+  return (x === 0 && y === 0) ||
+         (x === size - 7 && y === 0) ||
+         (x === 0 && y === size - 7);
 }
 
 // Gradient generator bound to a specific zone (bx, by, bw, bh)
@@ -893,7 +887,7 @@ async function svgToCanvas(
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) {
       reject(new Error("Could not get 2D context from canvas"));
       return;
@@ -2154,10 +2148,31 @@ export async function QRCodeGenerate(
   defsString += createSymbol("icon-dot", config.cornersDotOptions);
 
   // --- 2. DRAW LOOP ---
-  // <use> elements for icon/custom-icon shapes
-  let uses = { dots: "", cornerSquare: "", cornerDot: "" };
-  // Accumulated SVG path data for figure shapes
-  let pathsD = { dots: "", cornerSquare: "", cornerDot: "" };
+  // Arrays instead of string +=: V8 can avoid O(n) copying on each append.
+  // Joined once when consumed in the layer generators.
+  const usesBuf = { dots: [] as string[], cornerSquare: [] as string[], cornerDot: [] as string[] };
+  const pathBuf = { dots: [] as string[], cornerSquare: [] as string[], cornerDot: [] as string[] };
+
+  // Pre-resolve shape type, path key, scale and drawer functions once per call
+  // instead of re-looking them up on every matrix cell.
+  const dotsShapeType = config.dotsOptions.shape?.type ?? "figure";
+  const dotsShapePath = ((config.dotsOptions.shape as any)?.path ?? "square") as string;
+  const dotsScale = config.dotsOptions.scale ?? 1;
+  const dotsDrawer = neighborShapes[dotsShapePath] ?? neighborShapes["square"];
+
+  const sqShapeType = config.cornersSquareOptions.shape?.type ?? "figure";
+  const sqShapePath = ((config.cornersSquareOptions.shape as any)?.path ?? "square") as string;
+  const sqScale = config.cornersSquareOptions.scale ?? 1;
+  const sqMulti = config.cornersSquareOptions.isSingle === false || sqShapePath === "dots";
+  const sqDrawer = neighborShapes[sqShapePath] ?? neighborShapes["square"];
+  const sqSingleDrawer = cornerSquares[sqShapePath] ?? cornerSquares["square"];
+
+  const cdShapeType = config.cornersDotOptions.shape?.type ?? "figure";
+  const cdShapePath = ((config.cornersDotOptions.shape as any)?.path ?? "square") as string;
+  const cdScale = config.cornersDotOptions.scale ?? 1;
+  const cdMulti = config.cornersDotOptions.isSingle === false || cdShapePath === "dots";
+  const cdDrawer = neighborShapes[cdShapePath] ?? neighborShapes["square"];
+  const cdSingleDrawer = cornerDots[cdShapePath] ?? cornerDots["square"];
 
   const skipMatrix = Array(matrixSize)
     .fill(false)
@@ -2197,200 +2212,163 @@ export async function QRCodeGenerate(
       if (isBlocked) continue;
 
       const zone = getModuleZone(x, y, matrixSize);
-      let partConfig: QrPartOptions;
-      let symbolId = "";
-
-      if (zone === "dots") {
-        partConfig = config.dotsOptions;
-        symbolId = "#icon-dots";
-      } else if (zone === "cornerSquare") {
-        partConfig = config.cornersSquareOptions;
-        symbolId = "#icon-sq";
-      } else {
-        partConfig = config.cornersDotOptions;
-        symbolId = "#icon-dot";
-      }
-
-      // Default to figure/square when no shape is specified
-      const shapeType = partConfig.shape?.type ?? "figure";
-      const shapePath = (partConfig.shape as any)?.path ?? "square";
-      const scale = partConfig.scale ?? 1;
-
       // --- Figure rendering (math paths) ---
-      if (shapeType === "figure") {
-        if (zone === "dots") {
-          const neighbors = getNeighbors(x, y, matrix, matrixSize);
-          const drawer = neighborShapes[shapePath] ?? neighborShapes["square"];
-          pathsD.dots += drawer(
+      if (zone === "dots") {
+        if (dotsShapeType === "figure") {
+          pathBuf.dots.push(dotsDrawer(
             x + effectiveMargin,
             y + effectiveMargin,
-            neighbors,
-            scale,
-          );
-        } else if (zone === "cornerSquare") {
-          if (partConfig.isSingle === false || shapePath === "dots") {
-            const drawer =
-              neighborShapes[shapePath] ?? neighborShapes["square"];
-            pathsD.cornerSquare += drawer(
+            getNeighbors(x, y, matrix, matrixSize),
+            dotsScale,
+          ));
+          continue;
+        }
+        // icon / custom-icon / image-icon
+        const sw = dotsScale;
+        const off = (1 - sw) / 2;
+        usesBuf.dots.push(`<use href="#icon-dots" x="${x + effectiveMargin + off}" y="${y + effectiveMargin + off}" width="${sw}" height="${sw}" />`);
+        continue;
+      }
+
+      if (zone === "cornerSquare") {
+        if (sqShapeType === "figure") {
+          if (sqMulti) {
+            pathBuf.cornerSquare.push(sqDrawer(
               x + effectiveMargin,
               y + effectiveMargin,
               getNeighbors(x, y, matrix, matrixSize),
-              scale,
-            );
+              sqScale,
+            ));
           } else {
-            // Single shape per eye (isSingle: true or undefined)
             const origin = getEyeOrigin(x, y, matrixSize);
             if (!origin) continue;
             const eyeKey = `sq-${origin.ex}-${origin.ey}`;
             if (!drawnEyes.has(eyeKey)) {
               drawnEyes.add(eyeKey);
-              const drawer =
-                cornerSquares[shapePath] ?? cornerSquares["square"];
-              pathsD.cornerSquare += drawer(
+              pathBuf.cornerSquare.push(sqSingleDrawer(
                 origin.ex + effectiveMargin,
                 origin.ey + effectiveMargin,
                 7,
-              );
+              ));
             }
           }
+          continue;
+        }
+        // icon
+        if (config.cornersSquareOptions.isSingle !== false) {
+          if (!isOuterEyeStart(x, y, matrixSize)) continue;
+          const drawSize = 7;
+          for (let dy = 0; dy < 7; dy++) {
+            for (let dx = 0; dx < 7; dx++) {
+              if (dx >= 2 && dx <= 4 && dy >= 2 && dy <= 4) continue;
+              if (y + dy < matrixSize && x + dx < matrixSize)
+                skipMatrix[y + dy][x + dx] = true;
+            }
+          }
+          const sw = drawSize * sqScale;
+          const off = (drawSize - sw) / 2;
+          usesBuf.cornerSquare.push(`<use href="#icon-sq" x="${x + effectiveMargin + off}" y="${y + effectiveMargin + off}" width="${sw}" height="${sw}" />`);
         } else {
-          // cornerDot
-          if (partConfig.isSingle === false || shapePath === "dots") {
-            const drawer =
-              neighborShapes[shapePath] ?? neighborShapes["square"];
-            pathsD.cornerDot += drawer(
-              x + effectiveMargin,
-              y + effectiveMargin,
-              getNeighbors(x, y, matrix, matrixSize),
-              scale,
-            );
-          } else {
-            // Single shape for the 3×3 ball (isSingle: true or undefined)
-            const origin = getEyeOrigin(x, y, matrixSize);
-            if (!origin) continue;
-            const eyeKey = `dot-${origin.ex}-${origin.ey}`;
-            if (!drawnEyes.has(eyeKey)) {
-              drawnEyes.add(eyeKey);
-              const drawer = cornerDots[shapePath] ?? cornerDots["square"];
-              pathsD.cornerDot += drawer(
-                origin.ex + 2 + effectiveMargin,
-                origin.ey + 2 + effectiveMargin,
-                3,
-              );
-            }
-          }
+          const sw = sqScale;
+          const off = (1 - sw) / 2;
+          usesBuf.cornerSquare.push(`<use href="#icon-sq" x="${x + effectiveMargin + off}" y="${y + effectiveMargin + off}" width="${sw}" height="${sw}" />`);
         }
         continue;
       }
 
-      // --- Icon / custom-icon rendering (<use> + <symbol>) ---
-      let drawSize = 1;
-
-      if (zone === "cornerSquare" && partConfig.isSingle !== false) {
-        if (!isOuterEyeStart(x, y, matrixSize)) continue;
-        drawSize = 7;
-        for (let dy = 0; dy < 7; dy++) {
-          for (let dx = 0; dx < 7; dx++) {
-            // Leave the inner 3×3 cornerDot area free so it renders separately
-            if (dx >= 2 && dx <= 4 && dy >= 2 && dy <= 4) continue;
-            if (y + dy < matrixSize && x + dx < matrixSize)
-              skipMatrix[y + dy][x + dx] = true;
+      // cornerDot
+      if (cdShapeType === "figure") {
+        if (cdMulti) {
+          pathBuf.cornerDot.push(cdDrawer(
+            x + effectiveMargin,
+            y + effectiveMargin,
+            getNeighbors(x, y, matrix, matrixSize),
+            cdScale,
+          ));
+        } else {
+          const origin = getEyeOrigin(x, y, matrixSize);
+          if (!origin) continue;
+          const eyeKey = `dot-${origin.ex}-${origin.ey}`;
+          if (!drawnEyes.has(eyeKey)) {
+            drawnEyes.add(eyeKey);
+            pathBuf.cornerDot.push(cdSingleDrawer(
+              origin.ex + 2 + effectiveMargin,
+              origin.ey + 2 + effectiveMargin,
+              3,
+            ));
           }
         }
+        continue;
       }
-
-      if (zone === "cornerDot" && partConfig.isSingle !== false) {
+      // icon
+      if (config.cornersDotOptions.isSingle !== false) {
         if (!isInnerEyeStart(x, y, matrixSize)) continue;
-        drawSize = 3;
+        const drawSize = 3;
         for (let dy = 0; dy < 3; dy++) {
           for (let dx = 0; dx < 3; dx++) {
             if (y + dy < matrixSize && x + dx < matrixSize)
               skipMatrix[y + dy][x + dx] = true;
           }
         }
+        const sw = drawSize * cdScale;
+        const off = (drawSize - sw) / 2;
+        usesBuf.cornerDot.push(`<use href="#icon-dot" x="${x + effectiveMargin + off}" y="${y + effectiveMargin + off}" width="${sw}" height="${sw}" />`);
+      } else {
+        const sw = cdScale;
+        const off = (1 - sw) / 2;
+        usesBuf.cornerDot.push(`<use href="#icon-dot" x="${x + effectiveMargin + off}" y="${y + effectiveMargin + off}" width="${sw}" height="${sw}" />`);
       }
-
-      const baseX = x + effectiveMargin;
-      const baseY = y + effectiveMargin;
-
-      const sw = drawSize * scale;
-      const sh = drawSize * scale;
-      const offX = (drawSize - sw) / 2;
-      const offY = (drawSize - sh) / 2;
-
-      uses[zone] +=
-        `<use href="${symbolId}" x="${baseX + offX}" y="${baseY + offY}" width="${sw}" height="${sh}" />`;
     }
   }
 
   // --- 2b. MARGIN FILL DOTS ---
-  // When a wrapper is active and fillMargin is not false, flood the margin area
-  // (grid positions outside the QR matrix but inside fullSize) with dots.
-  //
-  // • fillMargin === true (or omitted) → merge into pathsD.dots / uses.dots so
-  //   the margin dots share the same gradient mask as the QR data dots.
-  // • fillMargin is a QrWrapperFillMargin object → collect into separate buffers
-  //   (marginFillPathD / marginFillUses) and render as a standalone SVG layer
-  //   with its own color, gradient, opacity, scale, density and shape.
+  // • fillMargin === true (or omitted) → push into pathBuf.dots / usesBuf.dots
+  //   so margin dots share the same gradient mask as the QR data dots.
+  // • fillMargin object → push into separate margin buffers for an independent layer.
 
-  // Separate-layer buffers (used only when fillMargin is an object)
-  let marginFillPathD = "";
-  let marginFillUses = "";
+  const marginFillPathBuf: string[] = [];
+  const marginFillUsesBuf: string[] = [];
 
   if (config.wrapper && config.wrapper.fillMargin !== false) {
     const fm = config.wrapper.fillMargin;
     const isFmObj = fm !== null && typeof fm === "object";
 
-    // Resolve shape/scale to use for margin fill
-    const fmShape: import("./types").QrShape | undefined = isFmObj
-      ? (fm as import("./types").QrWrapperFillMargin).shape ?? config.dotsOptions.shape
-      : config.dotsOptions.shape;
-    const fmScale = isFmObj
-      ? ((fm as import("./types").QrWrapperFillMargin).scale ?? config.dotsOptions.scale ?? 1)
-      : (config.dotsOptions.scale ?? 1);
-    const fmDensity = isFmObj
-      ? ((fm as import("./types").QrWrapperFillMargin).density ?? 1)
-      : 1;
+    const fmCast = isFmObj ? (fm as import("./types").QrWrapperFillMargin) : null;
+    const fmShape = fmCast?.shape ?? config.dotsOptions.shape;
+    const fmScale = fmCast?.scale ?? config.dotsOptions.scale ?? 1;
+    const fmDensity = fmCast?.density ?? 1;
 
     const fmShapeType = fmShape?.type ?? "figure";
     const fmShapePath = ((fmShape as any)?.path ?? "square") as string;
+    const fmIsIcon = fmShapeType === "icon" || fmShapeType === "custom-icon" || fmShapeType === "image-icon";
+    const fmDrawer = fmIsIcon ? null : (neighborShapes[fmShapePath] ?? neighborShapes["square"]);
+    const fmOffXY = fmIsIcon ? (1 - fmScale) / 2 : 0;
     const noNeighbors: Neighbors = { t: false, r: false, b: false, l: false };
 
-    // Deterministic density hash — returns 0..1 for position (mx, my)
+    // Deterministic density hash — returns 0..1 for (mx, my)
     const hashPos = (mx: number, my: number): number => {
       let h = (((mx * 2654435761) ^ (my * 2246822519)) >>> 0);
       h = (((h ^ (h >>> 16)) * 0x45d9f3b) >>> 0);
       return (h >>> 0) / 0x100000000;
     };
 
+    const targetPath = isFmObj ? marginFillPathBuf : pathBuf.dots;
+    const targetUses = isFmObj ? marginFillUsesBuf : usesBuf.dots;
     const ext = Math.ceil(effectiveMargin) + 1;
 
     for (let my = -ext; my < matrixSize + ext; my++) {
       for (let mx = -ext; mx < matrixSize + ext; mx++) {
         if (mx >= 0 && mx < matrixSize && my >= 0 && my < matrixSize) continue;
-
         if (fmDensity < 1 && hashPos(mx, my) >= fmDensity) continue;
 
         const px = mx + effectiveMargin;
         const py = my + effectiveMargin;
+        if (px >= fullSize || py >= fullSize || px + 1 <= 0 || py + 1 <= 0) continue;
 
-        if (px >= fullSize || py >= fullSize || px + 1 <= 0 || py + 1 <= 0)
-          continue;
-
-        const targetPathD = isFmObj ? { get: () => marginFillPathD, set: (v: string) => { marginFillPathD = v; } } : { get: () => pathsD.dots, set: (v: string) => { pathsD.dots = v; } };
-        const targetUses = isFmObj ? { get: () => marginFillUses, set: (v: string) => { marginFillUses = v; } } : { get: () => uses.dots, set: (v: string) => { uses.dots = v; } };
-
-        if (
-          fmShapeType === "icon" ||
-          fmShapeType === "custom-icon" ||
-          fmShapeType === "image-icon"
-        ) {
-          const offX = (1 - fmScale) / 2;
-          const offY = (1 - fmScale) / 2;
-          targetUses.set(targetUses.get() + `<use href="#icon-dots" x="${px + offX}" y="${py + offY}" width="${fmScale}" height="${fmScale}" />`);
+        if (fmIsIcon) {
+          targetUses.push(`<use href="#icon-dots" x="${px + fmOffXY}" y="${py + fmOffXY}" width="${fmScale}" height="${fmScale}" />`);
         } else {
-          const drawer = neighborShapes[fmShapePath] ?? neighborShapes["square"];
-          targetPathD.set(targetPathD.get() + drawer(px, py, noNeighbors, fmScale));
+          targetPath.push(fmDrawer!(px, py, noNeighbors, fmScale));
         }
       }
     }
@@ -2400,16 +2378,13 @@ export async function QRCodeGenerate(
 
   // Dots Layer (Global Gradient) — combines icon <use> elements and figure <path> data
   const generateDotsLayer = () => {
-    const hasUses = !!uses.dots;
-    const hasPaths = !!pathsD.dots;
-    if (!hasUses && !hasPaths) return "";
+    const dotUses = usesBuf.dots.join("");
+    const dotPath = pathBuf.dots.join("");
+    if (!dotUses && !dotPath) return "";
 
     const maskContent =
-      (hasUses ? uses.dots : "") +
-      (hasPaths ? `<path d="${pathsD.dots}" />` : "");
+      dotUses + (dotPath ? `<path d="${dotPath}" />` : "");
 
-    // Push mask into root defs — browsers can pre-parse all defs before
-    // rendering, avoiding a second pass for inline <mask> elements.
     defsString += `<mask id="mask-dots">
             <rect width="${fullSize}" height="${fullSize}" fill="black" />
             <g fill="white">${maskContent}</g>
@@ -2431,9 +2406,9 @@ export async function QRCodeGenerate(
   // Margin Fill Layer — rendered only when fillMargin is a QrWrapperFillMargin object.
   // Uses a separate mask/gradient so the margin dots can have independent styling.
   const generateMarginFillLayer = (): string => {
-    const hasUses = !!marginFillUses;
-    const hasPaths = !!marginFillPathD;
-    if (!hasUses && !hasPaths) return "";
+    const mUses = marginFillUsesBuf.join("");
+    const mPath = marginFillPathBuf.join("");
+    if (!mUses && !mPath) return "";
 
     const fm = config.wrapper!.fillMargin as import("./types").QrWrapperFillMargin;
     const opacity = fm.opacity ?? 1;
@@ -2447,9 +2422,7 @@ export async function QRCodeGenerate(
       fillRef = fm.color ?? _dotColor(config);
     }
 
-    const maskContent =
-      (hasUses ? marginFillUses : "") +
-      (hasPaths ? `<path d="${marginFillPathD}" />` : "");
+    const maskContent = mUses + (mPath ? `<path d="${mPath}" />` : "");
 
     defsString += `<mask id="mask-margin-fill">
             <rect width="${fullSize}" height="${fullSize}" fill="black" />
@@ -2466,14 +2439,12 @@ export async function QRCodeGenerate(
     key: "cornerSquare" | "cornerDot",
     partConfig: QrPartOptions,
   ) => {
-    const hasUses = !!uses[key];
-    const hasPaths = !!pathsD[key];
-    if (!hasUses && !hasPaths) return "";
+    const eyeUses = usesBuf[key].join("");
+    const eyePath = pathBuf[key].join("");
+    if (!eyeUses && !eyePath) return "";
 
     const maskId = `mask-${key}`;
-    const maskContent =
-      (hasUses ? uses[key] : "") +
-      (hasPaths ? `<path d="${pathsD[key]}" />` : "");
+    const maskContent = eyeUses + (eyePath ? `<path d="${eyePath}" />` : "");
 
     // Push mask into root defs instead of inlining a nested <defs> block.
     defsString += `

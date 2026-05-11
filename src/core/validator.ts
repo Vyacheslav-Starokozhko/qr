@@ -96,7 +96,7 @@ export function validateQRCanvas(
     ...args: T
   ): string => (typeof tpl === "function" ? tpl(...args) : tpl ?? fallback(...args));
 
-  const ctx = canvas.getContext("2d");
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) {
     return {
       valid: false,

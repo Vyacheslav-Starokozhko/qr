@@ -404,6 +404,18 @@ function resolveT(t?: RandomizeTuning): RT {
 
 const GRAD_ROTATIONS = [0, 45, 90, 135, 180, 225, 270, 315] as const;
 
+const BLEND_MODES = [
+  "screen", "multiply", "overlay", "darken", "lighten",
+  "hard-light", "soft-light", "color-dodge", "color-burn",
+  "difference", "exclusion",
+] as const;
+const EFFECT_TARGETS   = ["dots", "eyes", "all"] as const;
+const ANIM_TARGETS_PULSE   = ["dots", "eyes", "all"] as const;
+const ANIM_TARGETS_SHIMMER = ["dots", "eyes"] as const;
+const DRAW_DIRS  = ["ltr", "ttb", "rtl", "btt"] as const;
+const EMBOSS_DIRS = ["ne", "se", "sw", "nw"] as const;
+const CONVEX_AZIMUTHS = [0, 45, 90, 135, 180, 225, 270, 315] as const;
+
 function makeGen(tc: RT) {
   const ri = (lo: number, hi: number, rng: () => number) =>
     lo + Math.floor(rng() * (hi - lo + 1));
@@ -495,24 +507,6 @@ function makeGen(tc: RT) {
       opacity: i === 0 ? 1 : isDark ? 0.18 + rng() * 0.32 : 0.4 + rng() * 0.5,
     }));
   }
-
-  const BLEND_MODES = [
-    "screen",
-    "multiply",
-    "overlay",
-    "darken",
-    "lighten",
-    "hard-light",
-    "soft-light",
-    "color-dodge",
-    "color-burn",
-    "difference",
-    "exclusion",
-  ] as const;
-  const EFFECT_TARGETS = ["dots", "eyes", "all"] as const;
-  const ANIM_TARGETS_PULSE = ["dots", "eyes", "all"] as const;
-  const ANIM_TARGETS_SHIMMER = ["dots", "eyes"] as const;
-  const DRAW_DIRS = ["ltr", "ttb", "rtl", "btt"] as const;
 
   function randomColor(rng: () => number): string {
     return hslToHex(
@@ -621,11 +615,10 @@ function makeGen(tc: RT) {
       });
     }
     if (rng() < tc.fxEmboss && out.length < tc.fxMax) {
-      const DIRS = ["ne", "se", "sw", "nw"] as const;
       out.push({
         type: "emboss",
         target: pick(EFFECT_TARGETS, rng),
-        direction: pick(DIRS, rng),
+        direction: pick(EMBOSS_DIRS, rng),
         strength: 0.35 + rng() * 0.45,
         surfaceScale: 3 + rng() * 3,
       });
@@ -639,11 +632,10 @@ function makeGen(tc: RT) {
       });
     }
     if (rng() < tc.fxConvex && out.length < tc.fxMax) {
-      const AZIMUTHS = [0, 45, 90, 135, 180, 225, 270, 315] as const;
       out.push({
         type: "convex",
         target: pick(["dots", "all"] as const, rng),
-        azimuth: pick(AZIMUTHS, rng),
+        azimuth: pick(CONVEX_AZIMUTHS, rng),
         elevation: 30 + rng() * 40,
         surfaceScale: 3 + rng() * 5,
         strength: 0.8 + rng() * 0.7,

@@ -140,7 +140,7 @@ async function toCanvas(source: FrameSource, maxSize?: number): Promise<HTMLCanv
   const canvas = document.createElement("canvas");
   canvas.width = w;
   canvas.height = h;
-  canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
+  canvas.getContext("2d", { willReadFrequently: true })!.drawImage(img, 0, 0, w, h);
   return canvas;
 }
 
@@ -429,7 +429,7 @@ export async function analyzeFrame(
   }
 
   const canvas = await toCanvas(source);
-  const ctx = canvas.getContext("2d");
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) throw new Error("analyzeFrame(): could not get 2D context");
 
   const { width: w, height: h } = canvas;
@@ -527,7 +527,7 @@ export async function compressFrame(
   const fmt     = options?.format ?? "auto";
 
   const canvas = await toCanvas(source, maxSize);
-  const ctx    = canvas.getContext("2d")!;
+  const ctx    = canvas.getContext("2d", { willReadFrequently: true })!;
   const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
   let mime: string;

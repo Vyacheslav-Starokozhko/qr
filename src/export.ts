@@ -80,7 +80,7 @@ export async function renderSvgBatch(
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
-    const ctx = canvas.getContext("2d")!;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
     const bgStyle = bg.alpha > 0 ? `rgba(${bg.r},${bg.g},${bg.b},${bg.alpha})` : null;
     const results: Uint8ClampedArray[] = [];
 
