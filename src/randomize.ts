@@ -8,10 +8,13 @@ import {
   QrShape,
   QrDecorationBuiltinShape,
   QrDecorationPlacement,
+  QrDecoration,
   QrEffect,
+  QrEffectDuotone,
   QrAnimation,
   QrWrapperShape,
   QrWrapperFillMargin,
+  QrWrapper,
 } from "./types";
 
 /**
@@ -1244,6 +1247,113 @@ function _hasProblematicMaskedLayer(
   });
 }
 
+// Normalize a duotone effect: ensure colorDark and colorLight have sufficient
+// contrast against each other, since they fully replace the QR's own colors.
+function _adjustDuotone(
+  fx: QrEffectDuotone,
+  minRatio: number,
+): QrEffectDuotone {
+  const dark  = fx.colorDark  ?? "#000000";
+  const light = fx.colorLight ?? "#ffffff";
+  const darkLum  = _hexLum(dark);
+  const lightLum = _hexLum(light);
+  if (_wcag(darkLum, lightLum) >= minRatio) return fx;
+  // Shift the darker of the two further toward black, the lighter toward white.
+  const makeDarkDarker = darkLum <= lightLum;
+  return {
+    ...fx,
+    colorDark:  _adjustColor(dark,  lightLum, minRatio,  makeDarkDarker),
+    colorLight: _adjustColor(light, darkLum,  minRatio, !makeDarkDarker),
+  };
+}
+
+// Returns true when the wrapper's decorative colors (stroke ring + fillMargin)
+// already have sufficient contrast against the background.
+function _wrapperColorsOk(
+  wrapper: QrWrapper | undefined,
+  bgLum: number,
+  minRatio: number,
+): boolean {
+  if (!wrapper) return true;
+  if (wrapper.stroke && _wcag(_hexLum(wrapper.stroke), bgLum) < minRatio)
+    return false;
+  if (wrapper.strokeGradient && _wcag(_gradLum(wrapper.strokeGradient), bgLum) < minRatio)
+    return false;
+  if (typeof wrapper.fillMargin === "object" && wrapper.fillMargin) {
+    const fm = wrapper.fillMargin;
+    if (fm.color    && _wcag(_hexLum(fm.color),     bgLum) < minRatio) return false;
+    if (fm.gradient && _wcag(_gradLum(fm.gradient), bgLum) < minRatio) return false;
+  }
+  return true;
+}
+
+// Returns true when every decoration's color/gradient has sufficient contrast.
+function _decorationsColorsOk(
+  decs: QrDecoration[] | undefined,
+  bgLum: number,
+  minRatio: number,
+): boolean {
+  if (!decs?.length) return true;
+  return decs.every((d) => {
+    if (d.color    && _wcag(_hexLum(d.color),     bgLum) < minRatio) return false;
+    if (d.gradient && _wcag(_gradLum(d.gradient), bgLum) < minRatio) return false;
+    return true;
+  });
+}
+
+// Returns a copy of the wrapper with stroke/fillMargin colors adjusted, or the
+// original object when no adjustment is needed.
+function _adjustWrapper(
+  wrapper: QrWrapper | undefined,
+  bgLum: number,
+  minRatio: number,
+  darker: boolean,
+): QrWrapper | undefined {
+  if (!wrapper) return wrapper;
+  if (_wrapperColorsOk(wrapper, bgLum, minRatio)) return wrapper;
+
+  const result: QrWrapper = { ...wrapper };
+  if (wrapper.stroke)
+    result.stroke = _adjustColor(wrapper.stroke, bgLum, minRatio, darker);
+  if (wrapper.strokeGradient)
+    result.strokeGradient = _adjustGradient(wrapper.strokeGradient, bgLum, minRatio, darker);
+
+  if (typeof wrapper.fillMargin === "object" && wrapper.fillMargin) {
+    const fm = wrapper.fillMargin;
+    const fmResult: QrWrapperFillMargin = { ...fm };
+    if (fm.color)
+      fmResult.color = _adjustColor(fm.color, bgLum, minRatio, darker);
+    if (fm.gradient)
+      fmResult.gradient = _adjustGradient(fm.gradient, bgLum, minRatio, darker);
+    result.fillMargin = fmResult;
+  }
+  return result;
+}
+
+// Returns a new decorations array with all colors normalized, or the original
+// array (same reference) when nothing needed adjustment.
+function _adjustDecorations(
+  decs: QrDecoration[] | undefined,
+  bgLum: number,
+  minRatio: number,
+  darker: boolean,
+): QrDecoration[] | undefined {
+  if (!decs?.length) return decs;
+  let changed = false;
+  const result = decs.map((d) => {
+    const colorOk = !d.color    || _wcag(_hexLum(d.color),     bgLum) >= minRatio;
+    const gradOk  = !d.gradient || _wcag(_gradLum(d.gradient), bgLum) >= minRatio;
+    if (colorOk && gradOk) return d;
+    changed = true;
+    return {
+      ...d,
+      color:    d.color    ? _adjustColor(d.color, bgLum, minRatio, darker)             : d.color,
+      gradient: d.gradient ? _adjustGradient(d.gradient, bgLum, minRatio, darker)       : d.gradient,
+    };
+  });
+  return changed ? result : decs;
+}
+
 /**
  * Returns a copy of `base` with colors adjusted so the QR code is reliably
  * scannable, while preserving the original design as closely as possible.
@@ -1253,8 +1363,11 @@ function _hasProblematicMaskedLayer(
  * A binary search finds the *minimal* lightness shift that achieves the target
  * contrast, so the visual change is as small as physics allows.
  *
- * Works with solid colors, gradients (each stop independently), and overlays
- * (only full-coverage base layers — masked decorative layers are left untouched).
+ * Handles all color-bearing fields:
+ * - `dotsOptions`, `cornersSquareOptions`, `cornersDotOptions` — overlays
+ * - `effects.duotone` — normalizes `colorDark`/`colorLight` against each other
+ * - `wrapper.stroke`, `wrapper.strokeGradient`, `wrapper.fillMargin` color/gradient
+ * - `decorations[]` color/gradient
  *
  * Detects inverted QR codes (light dots on dark background) automatically and
  * shifts in the correct direction for both cases.
@@ -1263,69 +1376,72 @@ function _hasProblematicMaskedLayer(
  * @param minContrast Minimum WCAG contrast ratio (default 3.0).
  */
 export function normalizeOptions(base: Options, minContrast = 3.0): Options {
-  // Boost the required base contrast to compensate for SVG effects that reduce
-  // perceived contrast after rendering (blend, neon-glow, liquid all attenuate
-  // the luminance difference between dark modules and light background/gaps).
+  // ── Step 1: compute effective contrast floor, accounting for effects that
+  //    attenuate the perceived luminance difference between modules and gaps.
+  //    Also normalise duotone colors in-place (they replace ALL QR colors, so
+  //    their own internal contrast IS the QR contrast — no boost needed there).
   let effectiveMin = minContrast;
-  for (const fx of (base.effects as any[] | undefined) ?? []) {
-    if (fx.type === "blend")
-      effectiveMin = Math.max(effectiveMin, minContrast + 2.5);
-    else if (fx.type === "neon-glow")
-      effectiveMin = Math.max(effectiveMin, minContrast + 2.0);
-    else if (fx.type === "liquid")
-      effectiveMin = Math.max(effectiveMin, minContrast + 1.5);
-    else if (fx.type === "morphology")
-      effectiveMin = Math.max(effectiveMin, minContrast + 1.0);
-    else if (fx.type === "drop-shadow")
-      effectiveMin = Math.max(effectiveMin, minContrast + 0.5);
-    // New effects — all are luminance-safe but require extra headroom for safety
-    else if (fx.type === "noise")
-      effectiveMin = Math.max(effectiveMin, minContrast + 0.5);
-    else if (fx.type === "emboss")
-      effectiveMin = Math.max(effectiveMin, minContrast + 0.5);
-    // duotone replaces all colors — normalizer can't help, contrast is set by the duotone colors themselves
-    // color-split, noise: no effective contrast reduction on pure-black dots
-  }
+  let duotoneChanged = false;
+  const normalizedEffects: QrEffect[] = (base.effects ?? []).map((fx) => {
+    switch (fx.type) {
+      case "blend":        effectiveMin = Math.max(effectiveMin, minContrast + 2.5); break;
+      case "neon-glow":    effectiveMin = Math.max(effectiveMin, minContrast + 2.0); break;
+      case "liquid":       effectiveMin = Math.max(effectiveMin, minContrast + 1.5); break;
+      case "morphology":   effectiveMin = Math.max(effectiveMin, minContrast + 1.0); break;
+      case "drop-shadow":
+      case "noise":
+      case "emboss":
+      case "convex":
+        effectiveMin = Math.max(effectiveMin, minContrast + 0.5); break;
+      case "duotone": {
+        const adj = _adjustDuotone(fx as QrEffectDuotone, minContrast);
+        if (adj !== fx) { duotoneChanged = true; return adj; }
+        break;
+      }
+      // color-split: chroma shift only — no luminance reduction, no boost needed
+      // color-cycle (animation, not effect): not handled here
+    }
+    return fx;
+  });
   const minContrast_ = effectiveMin;
 
-  const bgLum = _bgLum(base);
-  const dotsLum = _partLum(base.dotsOptions) ?? 0;
-  const csLum = _partLum(base.cornersSquareOptions);
-  const cdLum = _partLum(base.cornersDotOptions);
+  // ── Step 2: gather luminance values for all dot/eye parts
+  const bgLum    = _bgLum(base);
+  const dotsLum  = _partLum(base.dotsOptions) ?? 0;
+  const csLum    = _partLum(base.cornersSquareOptions);
+  const cdLum    = _partLum(base.cornersDotOptions);
   const darkenDots = dotsLum <= bgLum;
 
-  const ok = (lum: number | null) =>
+  const moduleOk = (lum: number | null) =>
     lum === null || _wcag(lum, bgLum) >= minContrast_;
 
+  // ── Step 3: early-return when everything is already within spec
   if (
-    ok(dotsLum) &&
-    ok(csLum) &&
-    ok(cdLum) &&
-    !_hasProblematicMaskedLayer(base.dotsOptions, bgLum, minContrast_) &&
-    !_hasProblematicMaskedLayer(
-      base.cornersSquareOptions,
-      bgLum,
-      minContrast_,
-    ) &&
-    !_hasProblematicMaskedLayer(base.cornersDotOptions, bgLum, minContrast_)
+    !duotoneChanged &&
+    moduleOk(dotsLum) && moduleOk(csLum) && moduleOk(cdLum) &&
+    !_hasProblematicMaskedLayer(base.dotsOptions,        bgLum, minContrast_) &&
+    !_hasProblematicMaskedLayer(base.cornersSquareOptions, bgLum, minContrast_) &&
+    !_hasProblematicMaskedLayer(base.cornersDotOptions,  bgLum, minContrast_) &&
+    _wrapperColorsOk(base.wrapper,   bgLum, minContrast) &&
+    _decorationsColorsOk(base.decorations, bgLum, minContrast)
   )
     return base;
 
+  // ── Step 4: rebuild with adjusted colors
   return {
     ...base,
+    effects: duotoneChanged ? normalizedEffects : base.effects,
     dotsOptions: _adjustPart(base.dotsOptions, bgLum, minContrast_, darkenDots),
     cornersSquareOptions: _adjustPart(
-      base.cornersSquareOptions,
-      bgLum,
-      minContrast_,
-      darkenDots,
+      base.cornersSquareOptions, bgLum, minContrast_, darkenDots,
     ),
     cornersDotOptions: _adjustPart(
-      base.cornersDotOptions,
-      bgLum,
-      minContrast_,
-      darkenDots,
+      base.cornersDotOptions, bgLum, minContrast_, darkenDots,
     ),
+    // Wrapper stroke + fillMargin use the base minContrast — these are decorative
+    // elements outside the scan area and are not affected by QR filter effects.
+    wrapper:     _adjustWrapper(base.wrapper, bgLum, minContrast, darkenDots),
+    decorations: _adjustDecorations(base.decorations, bgLum, minContrast, darkenDots),
   };
 }
 
@@ -1369,12 +1485,15 @@ function invertPart(
  * Returns a new `Options` object with every colour mathematically inverted
  * (each channel: 255 − value). Swaps dark dots ↔ light background, turning a
  * standard QR into an inverted one and vice-versa.
+ *
+ * Covers all color-bearing fields: dot/eye parts, background, wrapper stroke +
+ * fillMargin, decorations, and duotone effect colors.
  */
 export function invertOptions(options: Options): Options {
   const result: Options = { ...options };
 
-  result.dotsOptions = invertPart(options.dotsOptions);
-  result.cornersDotOptions = invertPart(options.cornersDotOptions);
+  result.dotsOptions        = invertPart(options.dotsOptions);
+  result.cornersDotOptions  = invertPart(options.cornersDotOptions);
   result.cornersSquareOptions = invertPart(options.cornersSquareOptions);
 
   if (options.backgroundOptions) {
@@ -1389,6 +1508,46 @@ export function invertOptions(options: Options): Options {
           ? invertGradient(options.backgroundOptions.gradient)
           : undefined,
     };
+  }
+
+  // Wrapper: invert stroke ring and fillMargin colors
+  if (options.wrapper) {
+    const w = options.wrapper;
+    const wResult: QrWrapper = { ...w };
+    if (w.stroke)         wResult.stroke         = invertHex(w.stroke);
+    if (w.strokeGradient) wResult.strokeGradient = invertGradient(w.strokeGradient);
+    if (typeof w.fillMargin === "object" && w.fillMargin) {
+      const fm = w.fillMargin;
+      wResult.fillMargin = {
+        ...fm,
+        color:    fm.color    ? invertHex(fm.color)         : fm.color,
+        gradient: fm.gradient ? invertGradient(fm.gradient) : fm.gradient,
+      };
+    }
+    result.wrapper = wResult;
+  }
+
+  // Decorations: invert each element's color/gradient
+  if (options.decorations?.length) {
+    result.decorations = options.decorations.map((d) => ({
+      ...d,
+      color:    d.color    ? invertHex(d.color)         : d.color,
+      gradient: d.gradient ? invertGradient(d.gradient) : d.gradient,
+    }));
+  }
+
+  // Effects: invert duotone colors so inverted QR still maps correctly
+  if (options.effects?.length) {
+    result.effects = options.effects.map((fx) => {
+      if (fx.type === "duotone") {
+        return {
+          ...fx,
+          colorDark:  fx.colorDark  ? invertHex(fx.colorDark)  : fx.colorDark,
+          colorLight: fx.colorLight ? invertHex(fx.colorLight) : fx.colorLight,
+        };
+      }
+      return fx;
+    });
   }
 
   return result;
