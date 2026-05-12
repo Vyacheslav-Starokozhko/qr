@@ -175,14 +175,6 @@ import("./dist/index.js").then(async ({ exportQR }) => {
     ],
     animation: [
       {
-        type: "glow",
-        color: "#7a6beb",
-        intensity: 2.928581499028951,
-        duration: 3.79,
-        delay: 0.19,
-        target: "all",
-      },
-      {
         type: "color-cycle",
         target: "eyes",
         duration: 3.3862852975726128,
@@ -194,6 +186,11 @@ import("./dist/index.js").then(async ({ exportQR }) => {
         direction: "vertical",
         duration: 4.402888290584087,
         delay: 0.48,
+      },
+      {
+        type: "glow",
+        target: "all",
+        duration: 2,
       },
     ],
     wrapper: {
@@ -221,7 +218,7 @@ import("./dist/index.js").then(async ({ exportQR }) => {
     },
   };
 
-  const gif = await exportQR(config, "gif", { fps: 20 });
+  const gif = await exportQR(config, "gif", { fps: 30, cycles: 2, dithering: true });
   const fs = await import("fs");
   fs.writeFileSync("test_output.gif", gif);
   console.log("Written test_output.gif, size:", gif.length);

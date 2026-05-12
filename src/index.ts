@@ -147,12 +147,22 @@ async function _gifExport(
   input: string | Options,
   opts: ExportOptions,
 ): Promise<Buffer | Uint8Array> {
-  const fps = Math.max(1, Math.min(50, opts.fps ?? 20));
-  const cycles = Math.max(1, opts.cycles ?? 1);
-  const repeat = opts.repeat ?? 0;
+  const fps           = Math.max(1, Math.min(50, opts.fps ?? 24));
+  const cycles        = Math.max(1, opts.cycles ?? 2);
+  const repeat        = opts.repeat ?? 0;
+  const dithering     = opts.dithering !== false; // default true
+  // colors: explicit > quality shorthand (quality 1-100 → colors 2-256) > 256
+  const colors        = opts.colors != null
+    ? Math.max(2, Math.min(256, opts.colors))
+    : opts.quality != null
+      ? Math.max(2, Math.round((opts.quality / 100) * 256))
+      : 256;
+  // ditherStrength: user 0-100 → internal 0-255 scale, default 50 → 24 internal
+  const ditherStr255  = dithering
+    ? Math.round(((opts.ditherStrength ?? 50) / 100) * 48) // 50% → 24, 100% → 48
+    : 0;
   const bg = parseBg(opts.background);
   const isSvgString = typeof input === "string";
-
   let cycleDur = 0;
   if (!isSvgString) {
     const qrOpts = input as Options;
@@ -182,6 +192,26 @@ async function _gifExport(
   const outW = opts.width ?? intrinsic.width;
   const outH = opts.height ?? intrinsic.height;
 
+  // ── Browser + animated Options: use WebGL for pixel-accurate frame capture ──
+  // This matches exactly what the user sees in the frontend video preview.
+  // Dynamic import avoids the circular dep (webgl.ts already imports from index.ts).
+  if (typeof document !== "undefined" && !isSvgString && cycleDur > 0) {
+    const { QRCodeWebGL } = await import("./webgl");
+    const offscreen = document.createElement("canvas");
+    const handle = await QRCodeWebGL(offscreen, {
+      ...(input as Options),
+      width: outW,
+      height: outH,
+    });
+    const webglFrames: Uint8ClampedArray[] = [];
+    for (let f = 0; f < totalFrames; f++) {
+      webglFrames.push(handle.captureFrame((f / fps) % cycleDur));
+    }
+    handle.destroy();
+    return encodeGifFrames(webglFrames, outW, outH, frameDelay, repeat, dithering, colors, ditherStr255);
+  }
+
+  // ── SVG path: Node.js (sharp) or static / SVG-string input ────────────────
   // Build all SVG strings first (pure CPU — fast string construction)
   const svgs: string[] = [firstSvg];
   for (let f = 1; f < totalFrames; f++) {
@@ -200,8 +230,8 @@ async function _gifExport(
   // Batch-render all SVGs to RGBA (canvas reuse in browser, parallel in Node.js)
   const frames = await renderSvgBatch(svgs, outW, outH, bg);
 
-  // Encode: global palette + frame deduplication handled inside encodeGifFrames
-  return encodeGifFrames(frames, outW, outH, frameDelay, repeat);
+  // Encode: global palette + frame deduplication + Bayer dithering handled inside encodeGifFrames
+  return encodeGifFrames(frames, outW, outH, frameDelay, repeat, dithering, colors, ditherStr255);
 }
 
 export * from "./types";
@@ -1502,19 +1532,22 @@ function buildAnimations(
       const cm = `values="0 0 0 0 ${r.toFixed(4)}  0 0 0 0 ${g.toFixed(4)}  0 0 0 0 ${b.toFixed(4)}  0 0 0 0.85 0"`;
       if (isFrame) {
         const secs = Math.max(0, frameSecs! - delay);
-        const sd = triangleWave(0, intensity, secs / dur).toFixed(4);
-        defs += `<filter id="${fid}" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">
+        // +0.25 phase offset: triangleWave starts at its minimum (0) when cycleFrac=0,
+        // which means frame 0 has stdDeviation=0 → invisible glow.
+        // Offsetting by 0.25 starts at the wave peak so glow is visible throughout the GIF.
+        const sd = triangleWave(0, intensity, secs / dur + 0.25).toFixed(4);
+        defs += `<filter id="${fid}" x="-35%" y="-35%" width="170%" height="170%" color-interpolation-filters="sRGB">
           <feGaussianBlur in="SourceGraphic" stdDeviation="${sd}" result="blur"/>
           <feColorMatrix in="blur" type="matrix" ${cm} result="tinted"/>
-          <feMerge><feMergeNode in="tinted"/><feMergeNode in="SourceGraphic"/></feMerge>
+          <feBlend in="SourceGraphic" in2="tinted" mode="screen"/>
         </filter>`;
       } else {
-        defs += `<filter id="${fid}" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">
+        defs += `<filter id="${fid}" x="-35%" y="-35%" width="170%" height="170%" color-interpolation-filters="sRGB">
           <feGaussianBlur in="SourceGraphic" result="blur">
             <animate attributeName="stdDeviation" values="0;${intensity};0" dur="${dur}s" repeatCount="${rc}" begin="${delay}s"/>
           </feGaussianBlur>
           <feColorMatrix in="blur" type="matrix" ${cm} result="tinted"/>
-          <feMerge><feMergeNode in="tinted"/><feMergeNode in="SourceGraphic"/></feMerge>
+          <feBlend in="SourceGraphic" in2="tinted" mode="screen"/>
         </filter>`;
       }
       const prevD = wrapDots,

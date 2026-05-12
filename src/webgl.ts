@@ -476,7 +476,7 @@ class WebGLRenderer {
     this.startTime = performance.now();
     if (this.isStatic) {
       // One-shot render, no loop needed
-      this._render(0);
+      this.renderAt(0);
     } else {
       this._tick();
     }
@@ -509,10 +509,10 @@ class WebGLRenderer {
   private _tick = () => {
     this.rafId = requestAnimationFrame(this._tick);
     const elapsed = (performance.now() - this.startTime) / 1000;
-    this._render(elapsed);
+    this.renderAt(elapsed);
   };
 
-  private _render(elapsed: number) {
+  renderAt(elapsed: number) {
     const gl = this.gl;
     if (!this.baseTex) return;
 
@@ -604,22 +604,28 @@ class WebGLRenderer {
   }
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
+/** Flip RGBA pixel buffer from bottom-to-top (WebGL) to top-to-bottom (canvas/image). */
+function flipVerticalRGBA(src: Uint8ClampedArray, w: number, h: number): Uint8ClampedArray {
+  const dst = new Uint8ClampedArray(src.length);
+  const row = w * 4;
+  for (let y = 0; y < h; y++) dst.set(src.subarray(y * row, (y + 1) * row), (h - 1 - y) * row);
+  return dst;
+}
 
 /** Handle returned by {@link QRCodeWebGL}. */
 export interface QRWebGLHandle {
   /** The canvas being rendered to (same reference as passed in). */
   readonly canvas: HTMLCanvasElement;
-  /**
-   * Re-render with new options.  The QR matrix, effects, and animations are
-   * fully replaced.  The WebGL context is reused — no flicker.
-   */
+  /** Re-render with new options. The WebGL context is reused — no flicker. */
   update(options: Options): Promise<void>;
-  /**
-   * Cancel the animation loop and release all GPU resources.
-   * The canvas content is frozen at the last rendered frame.
-   */
+  /** Cancel the animation loop and release all GPU resources. */
   destroy(): void;
+  /**
+   * Stop the RAF loop and capture a single frame at `timeSeconds` into the animation.
+   * Returns raw RGBA pixels in top-to-bottom row order (same as `ImageData.data`).
+   * Call `destroy()` when done capturing all frames.
+   */
+  captureFrame(timeSeconds: number): Uint8ClampedArray;
 }
 
 /**
@@ -656,20 +662,21 @@ export async function QRCodeWebGL(
     );
   }
 
-  const w = options.width  ?? 1000;
-  const h = options.height ?? 1000;
-  canvas.width  = w;
-  canvas.height = h;
+  // Track current dimensions in outer scope so captureFrame can access them
+  let currentW = options.width  ?? 1000;
+  let currentH = options.height ?? 1000;
+  canvas.width  = currentW;
+  canvas.height = currentH;
 
   // Compile shaders once; reuse across update() calls
-  const renderer = new WebGLRenderer(canvas, gl, w, h);
+  const renderer = new WebGLRenderer(canvas, gl, currentW, currentH);
 
   async function applyOptions(opts: Options) {
-    const rW = opts.width  ?? 1000;
-    const rH = opts.height ?? 1000;
-    canvas.width  = rW;
-    canvas.height = rH;
-    renderer.resize(rW, rH);
+    currentW = opts.width  ?? 1000;
+    currentH = opts.height ?? 1000;
+    canvas.width  = currentW;
+    canvas.height = currentH;
+    renderer.resize(currentW, currentH);
 
     // Rasterise the QR without animations (effects are baked in)
     const staticOpts: Options = { ...opts, animation: undefined };
@@ -699,6 +706,15 @@ export async function QRCodeWebGL(
     },
     destroy() {
       renderer.destroy();
+    },
+    captureFrame(timeSeconds: number): Uint8ClampedArray {
+      // Stop the RAF loop so this render is the only one
+      renderer.stop();
+      renderer.renderAt(timeSeconds);
+      // gl.readPixels reads bottom-to-top; flipVerticalRGBA corrects to top-to-bottom
+      const pixels = new Uint8ClampedArray(currentW * currentH * 4);
+      gl.readPixels(0, 0, currentW, currentH, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      return flipVerticalRGBA(pixels, currentW, currentH);
     },
   };
 }

@@ -8,16 +8,37 @@ export interface ExportOptions {
   width?: number;
   /** Output height in pixels. Defaults to the SVG's own height attribute. */
   height?: number;
-  /** Quality for lossy formats (jpeg, webp). 1–100. Default: 90. */
+  /**
+   * Quality for lossy formats (jpeg, webp): 1–100, default 90.
+   * For **GIF**: shorthand for `colors` — `quality: 50` ≈ 128 palette colours.
+   * Ignored when `colors` is also set.
+   */
   quality?: number;
-  /** GIF: frames per second. Default: 20. */
+  /** GIF: frames per second. Default: 24. */
   fps?: number;
-  /** GIF: number of full animation cycles. Default: 1. */
+  /** GIF: number of full animation cycles. Default: 2. */
   cycles?: number;
   /** GIF: background — hex color or `"transparent"`. Default: `"transparent"`. */
   background?: string;
   /** GIF: loop count. 0 = loop forever (default). */
   repeat?: number;
+  /**
+   * GIF: apply Bayer 4×4 ordered dithering before palette quantization.
+   * Reduces visible colour banding on gradients and glow effects. Default: `true`.
+   */
+  dithering?: boolean;
+  /**
+   * GIF: number of palette colours (2–256). Default: 256.
+   * Fewer colours = smaller file, more visible banding.
+   * Overrides the `quality` shorthand.
+   */
+  colors?: number;
+  /**
+   * GIF: dithering spread intensity (0–100). Default: 50.
+   * 0 = minimal dither noise, 100 = strongest — best for heavy gradients.
+   * Has no effect when `dithering` is `false`.
+   */
+  ditherStrength?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -149,12 +170,49 @@ function indexedEqual(a: Uint8Array, b: Uint8Array): boolean {
  *     its delay is added to the previous frame. Helps with draw/float
  *     animations that have stationary start/end frames.
  */
+// Bayer 4×4 ordered-dithering matrix (values 0–15, row-major).
+const BAYER4 = new Uint8Array([0,8,2,10, 12,4,14,6, 3,11,1,9, 15,7,13,5]);
+
+/**
+ * Apply Bayer 4×4 ordered dithering to an RGBA frame.
+ * @param frame       Source RGBA pixels (not mutated).
+ * @param width       Image width in pixels.
+ * @param strength255 Peak dither offset in [0–255] units (±half on each channel).
+ */
+function applyBayerDither(
+  frame: Uint8ClampedArray,
+  width: number,
+  strength255: number,
+): Uint8ClampedArray {
+  const out  = new Uint8ClampedArray(frame);
+  const half = strength255 / 2;
+  for (let p = 0; p < out.length; p += 4) {
+    const px = (p >> 2) % width;
+    const py = Math.floor((p >> 2) / width);
+    const bv = BAYER4[(py & 3) * 4 + (px & 3)]; // 0–15
+    const d  = (bv / 15) * strength255 - half;    // −half … +half
+    out[p]     = Math.max(0, Math.min(255, out[p]     + d)) as number;
+    out[p + 1] = Math.max(0, Math.min(255, out[p + 1] + d)) as number;
+    out[p + 2] = Math.max(0, Math.min(255, out[p + 2] + d)) as number;
+    // Alpha channel untouched
+  }
+  return out;
+}
+
 export async function encodeGifFrames(
   frames: Uint8ClampedArray[],
   width: number,
   height: number,
   frameDelay: number,
   repeat: number,
+  dithering = true,
+  /** Palette colour count (2–256). */
+  colors = 256,
+  /**
+   * Dithering spread in 0–255 units (maps from the 0–100 public option).
+   * Ignored when dithering = false.
+   */
+  ditherStrength255 = 24,
 ): Promise<Buffer | Uint8Array> {
   let gifenc: any;
   try {
@@ -167,8 +225,9 @@ export async function encodeGifFrames(
   const { GIFEncoder, quantize, applyPalette } = mod;
 
   // ── 1. Build global palette from a sample of up to 16 frames ──────────────
-  const SAMPLE_N = Math.min(frames.length, 16);
-  const step     = Math.max(1, Math.floor(frames.length / SAMPLE_N));
+  const maxColors = Math.max(2, Math.min(256, colors));
+  const SAMPLE_N  = Math.min(frames.length, 16);
+  const step      = Math.max(1, Math.floor(frames.length / SAMPLE_N));
   // Concatenate sampled frame pixels into one big array for quantize
   let totalBytes = 0;
   for (let i = 0; i < frames.length; i += step) totalBytes += frames[i].length;
@@ -178,7 +237,7 @@ export async function encodeGifFrames(
     combined.set(frames[i], off);
     off += frames[i].length;
   }
-  const palette = quantize(combined, 256, { format: "rgba4444" });
+  const palette = quantize(combined, maxColors, { format: "rgba4444" });
 
   // ── 2. Index all frames and write, deduplicating identical consecutive ones ─
   const gif        = GIFEncoder();
@@ -187,7 +246,11 @@ export async function encodeGifFrames(
   let lastIndex: Uint8Array | null = null;
 
   for (let i = 0; i < frames.length; i++) {
-    const index = applyPalette(frames[i], palette);
+    // Apply Bayer ordered dithering before palette lookup to reduce colour banding
+    const pixelData = dithering
+      ? applyBayerDither(frames[i], width, ditherStrength255)
+      : frames[i];
+    const index = applyPalette(pixelData, palette);
     pendingDelay += frameDelay;
 
     // Skip duplicate frames (but always flush on the last frame)
